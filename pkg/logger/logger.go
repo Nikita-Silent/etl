@@ -84,7 +84,7 @@ func New(cfg Config) *Logger {
 		return newSlogLogger(slog.New(handler))
 	}
 
-	var writer io.Writer = cfg.Output
+	writer := cfg.Output
 	allowlist := normalizeAllowlist(cfg.FilterAllow)
 	if cfg.FilterField != "" && len(allowlist) > 0 {
 		writer = &filteringWriter{
@@ -157,7 +157,7 @@ func parseSlogLevel(level string) slog.Level {
 func (l *Logger) WithRequestID(requestID string) *Logger {
 	if l.backend == "slog" {
 		return &Logger{
-			Logger:  l.Logger.With("request_id", requestID),
+			Logger:  l.With("request_id", requestID),
 			zlogger: l.zlogger,
 			backend: l.backend,
 		}
@@ -169,7 +169,7 @@ func (l *Logger) WithRequestID(requestID string) *Logger {
 func (l *Logger) WithComponent(component string) *Logger {
 	if l.backend == "slog" {
 		return &Logger{
-			Logger:  l.Logger.With("component", component),
+			Logger:  l.With("component", component),
 			zlogger: l.zlogger,
 			backend: l.backend,
 		}
@@ -181,7 +181,7 @@ func (l *Logger) WithComponent(component string) *Logger {
 func (l *Logger) WithKassa(kassaCode, folderName string) *Logger {
 	if l.backend == "slog" {
 		return &Logger{
-			Logger:  l.Logger.With("kassa_code", kassaCode, "folder", folderName),
+			Logger:  l.With("kassa_code", kassaCode, "folder", folderName),
 			zlogger: l.zlogger,
 			backend: l.backend,
 		}
