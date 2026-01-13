@@ -26,13 +26,15 @@ const (
 type Logger struct {
 	*slog.Logger
 	zlogger zerolog.Logger
+	backend string
 }
 
 // Config holds logger configuration
 type Config struct {
-	Level  string // debug, info, warn, error
-	Format string // json, text/console
-	Output io.Writer
+	Level   string // debug, info, warn, error
+	Format  string // json, text/console
+	Output  io.Writer
+	Backend string // zerolog (default) or slog
 	// Filtering (allow only selected values of a structured field).
 	FilterField string   // e.g. event or component
 	FilterAllow []string // e.g. queue_item_processing_start,queue_item_processing_completed
@@ -45,12 +47,42 @@ func New(cfg Config) *Logger {
 		cfg.Output = os.Stdout
 	}
 
+	backend := strings.ToLower(cfg.Backend)
+	if backend == "" {
+		backend = "zerolog"
+	}
+
 	applyFilterEnv(&cfg)
 	timeFormat := cfg.TimeFormat
 	if timeFormat == "" {
 		timeFormat = time.RFC3339Nano
 	}
 	zerolog.TimeFieldFormat = timeFormat
+
+	if backend == "slog" {
+		level := parseSlogLevel(cfg.Level)
+		opts := &slog.HandlerOptions{
+			Level: level,
+			ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+				if a.Key == slog.TimeKey {
+					return slog.Attr{
+						Key:   a.Key,
+						Value: slog.StringValue(a.Value.Time().Format(timeFormat)),
+					}
+				}
+				return a
+			},
+		}
+
+		var handler slog.Handler
+		if isTextFormat(cfg.Format) {
+			handler = slog.NewTextHandler(cfg.Output, opts)
+		} else {
+			handler = slog.NewJSONHandler(cfg.Output, opts)
+		}
+
+		return newSlogLogger(slog.New(handler))
+	}
 
 	var writer io.Writer = cfg.Output
 	allowlist := normalizeAllowlist(cfg.FilterAllow)
@@ -108,18 +140,52 @@ func parseLevel(level string) zerolog.Level {
 	}
 }
 
+func parseSlogLevel(level string) slog.Level {
+	switch strings.ToLower(level) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
+}
+
 // WithRequestID returns a logger with request ID context
 func (l *Logger) WithRequestID(requestID string) *Logger {
+	if l.backend == "slog" {
+		return &Logger{
+			Logger:  l.Logger.With("request_id", requestID),
+			zlogger: l.zlogger,
+			backend: l.backend,
+		}
+	}
 	return newLogger(l.zlogger.With().Str("request_id", requestID).Logger())
 }
 
 // WithComponent returns a logger with component context
 func (l *Logger) WithComponent(component string) *Logger {
+	if l.backend == "slog" {
+		return &Logger{
+			Logger:  l.Logger.With("component", component),
+			zlogger: l.zlogger,
+			backend: l.backend,
+		}
+	}
 	return newLogger(l.zlogger.With().Str("component", component).Logger())
 }
 
 // WithKassa returns a logger with kassa context
 func (l *Logger) WithKassa(kassaCode, folderName string) *Logger {
+	if l.backend == "slog" {
+		return &Logger{
+			Logger:  l.Logger.With("kassa_code", kassaCode, "folder", folderName),
+			zlogger: l.zlogger,
+			backend: l.backend,
+		}
+	}
 	return newLogger(l.zlogger.With().
 		Str("kassa_code", kassaCode).
 		Str("folder", folderName).
@@ -223,6 +289,15 @@ func newLogger(zlogger zerolog.Logger) *Logger {
 	return &Logger{
 		Logger:  slog.New(handler),
 		zlogger: zlogger,
+		backend: "zerolog",
+	}
+}
+
+func newSlogLogger(slogger *slog.Logger) *Logger {
+	return &Logger{
+		Logger:  slogger,
+		zlogger: zerolog.Nop(),
+		backend: "slog",
 	}
 }
 

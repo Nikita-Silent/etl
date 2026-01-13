@@ -307,9 +307,10 @@ func (rqm *RequestQueueManager) StopAll() {
 func NewServer(cfg *models.Config) *Server {
 	// Create structured logger
 	loggerInstance := logger.New(logger.Config{
-		Level:  "info",
-		Format: "text",
-		Output: os.Stdout,
+		Level:   cfg.LogLevel,
+		Format:  "text",
+		Output:  os.Stdout,
+		Backend: cfg.LogBackend,
 	})
 	slog.SetDefault(loggerInstance.Logger)
 
@@ -1377,9 +1378,10 @@ func (s *Server) Run() error {
 
 func main() {
 	defaultLogger := logger.New(logger.Config{
-		Level:  "info",
-		Format: "text",
-		Output: os.Stdout,
+		Level:   "info",
+		Format:  "text",
+		Output:  os.Stdout,
+		Backend: os.Getenv("LOG_BACKEND"),
 	})
 	slog.SetDefault(defaultLogger.Logger)
 

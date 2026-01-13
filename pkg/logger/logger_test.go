@@ -233,6 +233,20 @@ func BenchmarkLogger_JSON(b *testing.B) {
 	}
 }
 
+func TestNew_WithSlogBackend(t *testing.T) {
+	buf := &bytes.Buffer{}
+	log := New(Config{
+		Output:  buf,
+		Format:  "text",
+		Backend: "slog",
+	})
+
+	log.Info("test message", "key", "value")
+	if buf.Len() == 0 {
+		t.Fatal("Expected slog backend to emit output")
+	}
+}
+
 func TestFilteringWriter_AllowsConfiguredEvents(t *testing.T) {
 	buf := &bytes.Buffer{}
 	log := New(Config{

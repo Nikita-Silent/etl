@@ -13,9 +13,10 @@ import (
 
 func main() {
 	defaultLogger := logger.New(logger.Config{
-		Level:  "info",
-		Format: "text",
-		Output: os.Stdout,
+		Level:   "info",
+		Format:  "text",
+		Output:  os.Stdout,
+		Backend: os.Getenv("LOG_BACKEND"),
 	})
 	slog.SetDefault(defaultLogger.Logger)
 
@@ -47,11 +48,12 @@ func main() {
 
 	// Create logger
 	loggerInstance := logger.New(logger.Config{
-		Level:  "info",
-		Format: "text",
-		Output: os.Stdout,
+		Level:   cfg.LogLevel,
+		Format:  "text",
+		Output:  os.Stdout,
+		Backend: cfg.LogBackend,
 	})
-	log := loggerInstance.With("component", "loader")
+	log := loggerInstance.WithComponent("loader")
 
 	// Create context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
@@ -62,7 +64,7 @@ func main() {
 		"date", date,
 		"event", "etl_start",
 	)
-	result, err := pipeline.Run(ctx, log, cfg, date)
+	result, err := pipeline.Run(ctx, log.Logger, cfg, date)
 	if err != nil {
 		log.ErrorContext(ctx, "ETL pipeline failed",
 			"error", err.Error(),

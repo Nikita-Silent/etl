@@ -32,6 +32,7 @@ type Config struct {
 	WaitDelayMinutes time.Duration
 	WorkerPoolSize   int // Number of concurrent file processing workers (default: 10)
 	LogLevel         string
+	LogBackend       string // slog or zerolog
 
 	// Webhook server settings
 	ServerPort            int
