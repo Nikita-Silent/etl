@@ -85,6 +85,14 @@ func (c *Client) Channel() (*amqp.Channel, error) {
 	return c.channel, nil
 }
 
+// OpenChannel creates a fresh channel (callers must close).
+func (c *Client) OpenChannel() (*amqp.Channel, error) {
+	if err := c.Connect(); err != nil {
+		return nil, err
+	}
+	return c.conn.Channel()
+}
+
 // Publish sends a message to the requests exchange with routing key.
 func (c *Client) Publish(ctx context.Context, routingKey string, body []byte, headers amqp.Table) error {
 	if c.channel == nil {

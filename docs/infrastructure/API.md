@@ -181,6 +181,17 @@ Host: localhost:$SERVER_PORT
 Статус очереди обработки запросов.
 Подробная схема ответа — в `api/openapi.yaml`.
 
+**Поля ответа (фактическая реализация):**
+- `queue_provider` — `rabbitmq` (по умолчанию) или `memory`
+- `total_queue_size`, `load_queue_size`, `download_queue_size`, `active_operations` — состояние локальной очереди (для совместимости)
+- `rabbitmq_status` — `ok` или сообщение об ошибке (когда провайдер `rabbitmq`)
+- `rabbitmq` — объект с агрегатами брокера (появляется при `rabbitmq_status=ok`):
+  - `total` — суммарное количество сообщений в очередях
+  - `per_operation` — суммы по операциям (например, `load`)
+  - `queues` — карта `queueName -> messages` (формат `etl.<operation>.<cashbox>`)
+
+> Note: операции `download` пока обрабатываются in-memory, поэтому в RabbitMQ отчитываются только очереди `load`.
+
 ---
 
 #### 7. GET /api/kassas

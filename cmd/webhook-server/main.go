@@ -434,10 +434,11 @@ func (s *Server) rabbitMQQueueStats(ctx context.Context) (map[string]int, error)
 	if s.amqpClient == nil {
 		return nil, fmt.Errorf("amqp client not initialized")
 	}
-	ch, err := s.amqpClient.Channel()
+	ch, err := s.amqpClient.OpenChannel()
 	if err != nil {
 		return nil, err
 	}
+	defer ch.Close()
 
 	stats := make(map[string]int)
 	cashboxes := s.flattenCashboxes()
@@ -451,6 +452,13 @@ func (s *Server) rabbitMQQueueStats(ctx context.Context) (map[string]int, error)
 			qs := queue.BuildQueueSet(string(op), cashbox)
 			info, err := ch.QueueInspect(qs.PrimaryQueue)
 			if err != nil {
+				if amqpErr, ok := err.(*amqp.Error); ok && amqpErr.Code == amqp.NotFound {
+					s.logger.Warn("Queue not found in RabbitMQ stats",
+						"queue", qs.PrimaryQueue,
+						"event", "rabbitmq_queue_missing",
+					)
+					continue
+				}
 				return nil, fmt.Errorf("inspect queue %s: %w", qs.PrimaryQueue, err)
 			}
 			stats[qs.PrimaryQueue] = info.Messages
@@ -1318,7 +1326,20 @@ func (s *Server) queueStatusHandler(w http.ResponseWriter, r *http.Request) {
 			response["rabbitmq_status"] = fmt.Sprintf("error: %v", err)
 		} else {
 			response["rabbitmq_status"] = "ok"
-			response["rabbitmq_queues"] = stats
+			perOp := map[string]int{}
+			total := 0
+			for q, count := range stats {
+				total += count
+				parts := strings.Split(q, ".")
+				if len(parts) >= 3 {
+					perOp[parts[1]] += count
+				}
+			}
+			response["rabbitmq"] = map[string]interface{}{
+				"queues":        stats,
+				"total":         total,
+				"per_operation": perOp,
+			}
 		}
 	}
 
