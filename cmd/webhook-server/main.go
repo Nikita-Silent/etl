@@ -468,7 +468,9 @@ func (s *Server) rabbitMQQueueStats(ctx context.Context) (map[string]int, error)
 	if err != nil {
 		return nil, err
 	}
-	defer ch.Close()
+	defer func() {
+		_ = ch.Close()
+	}()
 
 	stats := make(map[string]int)
 	cashboxes := s.flattenCashboxes()
@@ -480,7 +482,11 @@ func (s *Server) rabbitMQQueueStats(ctx context.Context) (map[string]int, error)
 	for _, op := range ops {
 		for _, cashbox := range cashboxes {
 			qs := queue.BuildQueueSet(string(op), cashbox)
-			info, err := ch.QueueInspect(qs.PrimaryQueue)
+			args := amqp.Table{
+				"x-dead-letter-exchange":    queue.ExchangeDLX,
+				"x-dead-letter-routing-key": qs.DLQRoutingKey,
+			}
+			info, err := ch.QueueDeclarePassive(qs.PrimaryQueue, true, false, false, false, args)
 			if err != nil {
 				if amqpErr, ok := err.(*amqp.Error); ok && amqpErr.Code == amqp.NotFound {
 					s.logger.Warn("Queue not found in RabbitMQ stats",

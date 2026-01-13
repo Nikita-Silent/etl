@@ -92,7 +92,9 @@ func (c *Consumer) consumeLoop(ctx context.Context, qs QueueSet, handler Handler
 	if err != nil {
 		return err
 	}
-	defer ch.Close()
+	defer func() {
+		_ = ch.Close()
+	}()
 
 	if c.prefetch > 0 {
 		if err := ch.Qos(c.prefetch, 0, false); err != nil {
@@ -148,7 +150,7 @@ func (c *Consumer) handleDelivery(ctx context.Context, ch *amqp.Channel, qs Queu
 	}
 
 	if err := handler(ctx, payload); err != nil {
-		if retryCount < int32(c.maxRetries) {
+		if int64(retryCount) < int64(c.maxRetries) {
 			headers := amqp.Table{
 				"x-retry-count": retryCount + 1,
 				"x-first-seen":  firstSeen,

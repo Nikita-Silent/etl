@@ -27,10 +27,12 @@ func (r *DLQRequeuer) Requeue(ctx context.Context, qs QueueSet, minAge time.Dura
 	if err != nil {
 		return 0, err
 	}
-	defer ch.Close()
+	defer func() {
+		_ = ch.Close()
+	}()
 
 	// Ensure DLQ exists
-	if _, err := ch.QueueInspect(qs.DLQ); err != nil {
+	if _, err := ch.QueueDeclarePassive(qs.DLQ, true, false, false, false, nil); err != nil {
 		return 0, fmt.Errorf("inspect dlq %s: %w", qs.DLQ, err)
 	}
 
