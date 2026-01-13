@@ -1,0 +1,26 @@
+services:
+  # PostgreSQL для тестов
+  postgres-test:
+    image: postgres:15-alpine
+    container_name: frontol-postgres-test
+    environment:
+      POSTGRES_USER: frontol_user
+      POSTGRES_PASSWORD: test_password
+      POSTGRES_DB: kassa_db_test
+      POSTGRES_INITDB_ARGS: "-E UTF8 --locale=C"
+    ports:
+      - "5433:5432"  # Используем другой порт, чтобы не конфликтовать с основной БД
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U frontol_user -d kassa_db_test"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+    networks:
+      - test-network
+    tmpfs:
+      - /var/lib/postgresql/data  # Используем tmpfs для быстрых тестов (данные не сохраняются)
+
+networks:
+  test-network:
+    driver: bridge
+

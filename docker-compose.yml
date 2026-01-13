@@ -1,0 +1,252 @@
+services:
+  # PostgreSQL is external (running in separate cluster)
+  # Configure DB_HOST, DB_PORT, DB_USER, DB_PASSWORD in .env
+
+  # Database Migrations (Init container - runs once before other services)
+  migrate:
+    build: .
+    container_name: frontol-migrate
+    environment:
+      # Database Configuration (external PostgreSQL cluster)
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME:-kassa_db}
+      DB_SSLMODE: ${DB_SSLMODE:-disable}
+    networks:
+      - frontol-network
+    command: ["./migrate", "up"]
+    restart: "no"  # Run once and exit
+  
+  # FTP Structure Init Container (creates folder structure)
+  ftp-structure-init:
+    image: alpine:latest
+    container_name: frontol-ftp-structure-init
+    environment:
+      FTP_USER: ${FTP_USER:-frontol}
+      FTP_USER_HOME: /home/ftp/${FTP_USER:-frontol}
+      FTP_REQUEST_DIR: ${FTP_REQUEST_DIR:-/request}
+      FTP_RESPONSE_DIR: ${FTP_RESPONSE_DIR:-/response}
+      KASSA_STRUCTURE: ${KASSA_STRUCTURE:-P13:P13;N22:N22_Inter,N22_FURN;SH54:SH54;S6:S6;L98:L98;L32:L32;S39:S39;O49:O49;L28:L28}
+      FTP_OWNER_USER: ${FTP_OWNER_USER:-ftpuser}
+      FTP_OWNER_GROUP: ${FTP_OWNER_GROUP:-ftpgroup}
+      FTP_UID: ${FTP_UID:-1000}
+      FTP_GID: ${FTP_GID:-1000}
+    volumes:
+      - ftp_data:/home/ftp
+      - ./scripts:/scripts:ro
+    command: /bin/sh /scripts/create-ftp-structure.sh
+    restart: "no"  # Run once and exit
+    networks:
+      - frontol-network
+
+  # FTP Server (Go implementation)
+  ftp-server:
+    build: .
+    container_name: frontol-ftp
+    depends_on:
+      ftp-structure-init:
+        condition: service_completed_successfully
+    environment:
+      FTP_USER: ${FTP_USER:-frontol}
+      FTP_PASSWORD: ${FTP_PASSWORD:-frontol123}
+      # FTP_ROOT_PATH is auto-generated from FTP_USER if not set
+      FTP_ROOT_PATH: ${FTP_ROOT_PATH:-}
+      PUBLICHOST: ${PUBLICHOST:-}
+      PASV_MIN_PORT: ${PASV_MIN_PORT:-30000}
+      PASV_MAX_PORT: ${PASV_MAX_PORT:-30009}
+      FTP_PORT: ${FTP_PORT:-21}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - ftp_data:/home/ftp
+    ports:
+      - "${FTP_PORT:-21}:21"
+      - "${PASV_MIN_PORT:-30000}-${PASV_MAX_PORT:-30009}:30000-30009"
+    networks:
+      - frontol-network
+    # Run as FTP user (UID 1000) to match directory ownership
+    user: "1000:1000"
+    command: ["./ftp-server"]
+    restart: unless-stopped
+
+  # Webhook Server
+  webhook-server:
+    build: .
+    container_name: frontol-webhook
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      ftp-server:
+        condition: service_started
+    environment:
+      # Database Configuration (external PostgreSQL cluster)
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME:-kassa_db}
+      DB_SSLMODE: ${DB_SSLMODE:-disable}
+      
+      # FTP Configuration
+      FTP_HOST: ${FTP_HOST:-ftp-server}
+      FTP_PORT: ${FTP_PORT:-21}
+      FTP_USER: ${FTP_USER:-frontol}
+      FTP_PASSWORD: ${FTP_PASSWORD:-frontol123}
+      FTP_REQUEST_DIR: ${FTP_REQUEST_DIR:-/request}
+      FTP_RESPONSE_DIR: ${FTP_RESPONSE_DIR:-/response}
+      KASSA_STRUCTURE: ${KASSA_STRUCTURE:-P13:P13;N22:N22_Inter,N22_FURN;SH54:SH54;S6:S6;L98:L98;L32:L32;S39:S39;O49:O49;L28:L28}
+      
+      # Application Configuration
+      LOCAL_DIR: /app/tmp/frontol
+      BATCH_SIZE: 1000
+      MAX_RETRIES: 3
+      RETRY_DELAY_SECONDS: 5
+      WAIT_DELAY_MINUTES: 1
+      LOG_LEVEL: info
+      
+      # Webhook Configuration
+      SERVER_PORT: ${SERVER_PORT:-8080}
+      WEBHOOK_REPORT_URL: ${WEBHOOK_REPORT_URL:-}
+      WEBHOOK_TIMEOUT_MINUTES: ${WEBHOOK_TIMEOUT_MINUTES:-0}
+      WEBHOOK_BEARER_TOKEN: ${WEBHOOK_BEARER_TOKEN:-}
+    ports:
+      - "${SERVER_PORT:-8080}:${SERVER_PORT:-8080}"
+    networks:
+      - frontol-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:${SERVER_PORT:-8080}/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # CLI Loader (for manual runs)
+  loader:
+    build: .
+    container_name: frontol-loader
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      ftp-server:
+        condition: service_started
+    environment:
+      # Database Configuration (external PostgreSQL cluster)
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME:-kassa_db}
+      DB_SSLMODE: ${DB_SSLMODE:-disable}
+      
+      FTP_HOST: ${FTP_HOST:-ftp-server}
+      FTP_PORT: ${FTP_PORT:-21}
+      FTP_USER: ${FTP_USER:-frontol}
+      FTP_PASSWORD: ${FTP_PASSWORD:-frontol123}
+      FTP_REQUEST_DIR: ${FTP_REQUEST_DIR:-/request}
+      FTP_RESPONSE_DIR: ${FTP_RESPONSE_DIR:-/response}
+      KASSA_STRUCTURE: ${KASSA_STRUCTURE:-P13:P13;N22:N22_Inter,N22_FURN;SH54:SH54;S6:S6;L98:L98;L32:L32;S39:S39;O49:O49;L28:L28}
+      
+      LOCAL_DIR: ${LOCAL_DIR:-/tmp/frontol}
+      BATCH_SIZE: ${BATCH_SIZE:-1000}
+      MAX_RETRIES: ${MAX_RETRIES:-3}
+      RETRY_DELAY_SECONDS: ${RETRY_DELAY_SECONDS:-5}
+      WAIT_DELAY_MINUTES: ${WAIT_DELAY_MINUTES:-1}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - app_data:/tmp/frontol
+    networks:
+      - frontol-network
+    profiles:
+      - cli
+    command: ["./frontol-loader"]
+
+  # Parser Test (for testing file parsing)
+  parser-test:
+    build: .
+    container_name: frontol-parser-test
+    environment:
+      # Minimal environment for parser testing
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - ./test-data:/app/test-data:ro
+    networks:
+      - frontol-network
+    profiles:
+      - cli
+    command: ["./parser-test", "/app/test-data/sample.txt"]
+
+  # Send Request (send request files to all kassas)
+  send-request:
+    build: .
+    container_name: frontol-send-request
+    environment:
+      FTP_HOST: ${FTP_HOST:-ftp-server}
+      FTP_PORT: ${FTP_PORT:-21}
+      FTP_USER: ${FTP_USER:-frontol}
+      FTP_PASSWORD: ${FTP_PASSWORD:-frontol123}
+      FTP_REQUEST_DIR: ${FTP_REQUEST_DIR:-/request}
+      KASSA_STRUCTURE: ${KASSA_STRUCTURE:-P13:P13;N22:N22_Inter,N22_FURN;SH54:SH54;S6:S6;L98:L98;L32:L32;S39:S39;O49:O49;L28:L28}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      ftp-server:
+        condition: service_started
+    networks:
+      - frontol-network
+    profiles:
+      - cli
+    command: ["./send-request"]
+
+  # Clear Requests (clear request/response folders)
+  clear-requests:
+    build: .
+    container_name: frontol-clear-requests
+    environment:
+      FTP_HOST: ${FTP_HOST:-ftp-server}
+      FTP_PORT: ${FTP_PORT:-21}
+      FTP_USER: ${FTP_USER:-frontol}
+      FTP_PASSWORD: ${FTP_PASSWORD:-frontol123}
+      FTP_REQUEST_DIR: ${FTP_REQUEST_DIR:-/request}
+      FTP_RESPONSE_DIR: ${FTP_RESPONSE_DIR:-/response}
+      KASSA_STRUCTURE: ${KASSA_STRUCTURE:-P13:P13;N22:N22_Inter,N22_FURN;SH54:SH54;S6:S6;L98:L98;L32:L32;S39:S39;O49:O49;L28:L28}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      ftp-server:
+        condition: service_started
+    networks:
+      - frontol-network
+    profiles:
+      - cli
+    command: ["./clear-requests"]
+
+  # FTP Check (diagnostic tool to check FTP state)
+  ftp-check:
+    build: .
+    container_name: frontol-ftp-check
+    environment:
+      FTP_HOST: ${FTP_HOST:-ftp-server}
+      FTP_PORT: ${FTP_PORT:-21}
+      FTP_USER: ${FTP_USER:-frontol}
+      FTP_PASSWORD: ${FTP_PASSWORD:-frontol123}
+      FTP_REQUEST_DIR: ${FTP_REQUEST_DIR:-/request}
+      FTP_RESPONSE_DIR: ${FTP_RESPONSE_DIR:-/response}
+      KASSA_STRUCTURE: ${KASSA_STRUCTURE:-P13:P13;N22:N22_Inter,N22_FURN;SH54:SH54;S6:S6;L98:L98;L32:L32;S39:S39;O49:O49;L28:L28}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      ftp-server:
+        condition: service_started
+    networks:
+      - frontol-network
+    profiles:
+      - cli
+    command: ["./ftp-check"]
+
+volumes:
+  ftp_data:
+    driver: local
+  app_data:
+    driver: local
+
+networks:
+  frontol-network:
+    driver: bridge

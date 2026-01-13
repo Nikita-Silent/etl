@@ -1,0 +1,51 @@
+# Environment files
+/.env
+/configs
+
+# Compiled binaries
+/clear-requests
+/frontol-loader
+/frontol-loader-local
+/loader
+/main
+/migrate
+/parser-test
+/send-request
+/webhook-server
+
+# Test files
+/test_response.txt
+/test_types_*.txt
+/*.test
+coverage.out
+coverage.html
+*.prof
+*.pprof
+*.out
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.log
+*.tmp
+/tmp/
+tmp/
+temp/
+.cache/
+
+# Data artifacts
+/data/kassa_*.txt
+
+# bv (beads viewer) local config and caches
+.bv/
+
+# Binaries built in subfolders
+cmd/**/cmd
+cmd/**/main
+**/*.exe

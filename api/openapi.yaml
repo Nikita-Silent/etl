@@ -1,0 +1,595 @@
+openapi: 3.1.0
+info:
+  title: Frontol ETL Loader API
+  version: 1.0.0
+  description: |
+    API для управления ETL pipeline обработки данных Frontol 6.
+    
+    Основные возможности:
+    - Загрузка данных из FTP в базу данных PostgreSQL
+    - Выгрузка данных из базы данных в файлы формата Frontol
+    - Мониторинг состояния очереди запросов
+    - Получение списка доступных касс
+    - Автоматическая отправка отчетов о выполнении ETL на webhook URL
+    
+    Все API endpoints (кроме /api/health и /api/docs) требуют Bearer авторизации.
+    
+    **Webhook отчеты:**
+    
+    После завершения ETL pipeline система автоматически отправляет POST запрос на URL,
+    указанный в переменной окружения `WEBHOOK_REPORT_URL` (если она настроена).
+    Отчет содержит полную информацию о выполнении ETL: статистику обработки файлов,
+    количество транзакций, ошибки и другую диагностическую информацию.
+    См. схему `WebhookReport` для детального описания структуры данных.
+  contact:
+    name: Frontol ETL Loader
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:{port}
+    description: Development server
+    variables:
+      port:
+        default: "8080"
+        description: Use SERVER_PORT from .env
+  - url: https://api.example.com
+    description: Production server
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: ETL Operations
+    description: Операции загрузки и выгрузки данных
+  - name: Monitoring
+    description: Мониторинг состояния системы
+  - name: Data
+    description: Работа с данными касс
+
+paths:
+  /api/load:
+    post:
+      tags:
+        - ETL Operations
+      summary: Загрузка данных из FTP в БД
+      description: |
+        Запускает ETL pipeline для загрузки данных из FTP сервера в базу данных PostgreSQL.
+        Запрос добавляется в очередь и обрабатывается асинхронно.
+        
+        Процесс включает:
+        1. Очистку FTP папок
+        2. Генерацию и отправку request.txt с указанной датой
+        3. Ожидание ответов от Frontol
+        4. Загрузку и парсинг файлов
+        5. Загрузку транзакций в базу данных
+        
+        **Webhook отчеты:**
+        
+        После завершения ETL pipeline (успешного или с ошибкой) система автоматически отправляет
+        POST запрос на URL, указанный в переменной окружения `WEBHOOK_REPORT_URL` (если она настроена).
+        
+        **Формат запроса:**
+        - Метод: `POST`
+        - URL: значение переменной окружения `WEBHOOK_REPORT_URL`
+        - Заголовки:
+          - `Content-Type: application/json`
+          - `User-Agent: Frontol-ETL-Webhook/1.0`
+          - `Authorization: Bearer <token>` (если настроен `WEBHOOK_BEARER_TOKEN`)
+        - Тело: JSON объект типа `WebhookReport`
+        
+        **Структура данных:**
+        
+        Тело запроса содержит JSON объект с полной информацией о выполнении ETL pipeline:
+        - `request_id` - идентификатор запроса, полученный при вызове `/api/load`
+        - `date` - дата обработки
+        - `status` - статус выполнения (`completed`, `failed`, `timeout`, `processing`)
+        - `start_time`, `end_time` - временные метки начала и окончания
+        - `duration` - длительность выполнения
+        - `files_processed`, `files_skipped` - статистика по файлам
+        - `transactions_loaded` - количество загруженных транзакций
+        - `errors` - количество ошибок
+        - `success` - флаг успешного завершения
+        - `error_message` - сообщение об ошибке (при наличии)
+        - `transaction_details` - детальная статистика по типам транзакций (опционально)
+        
+        См. схему `WebhookReport` в разделе Components для детального описания всех полей и примеров.
+      operationId: loadData
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookRequest'
+            examples:
+              withDate:
+                summary: С указанной датой
+                value:
+                  date: "2024-12-01"
+              withoutDate:
+                summary: Без даты (текущая дата)
+                value: {}
+      responses:
+        '202':
+          description: Запрос принят и добавлен в очередь
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookResponse'
+              example:
+                status: "queued"
+                date: "2024-12-01"
+                message: "Request added to queue"
+                request_id: "req_1703123456789"
+        '400':
+          description: Неверный формат запроса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Invalid date format. Expected YYYY-MM-DD"
+        '401':
+          description: Не авторизован
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Очередь переполнена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Service unavailable: queue is full"
+
+  /api/files:
+    get:
+      tags:
+        - ETL Operations
+      summary: Выгрузка данных из БД в файл
+      description: |
+        Выгружает все транзакции для указанной кассы и даты в формате Frontol.
+        Файл содержит все транзакции из всех таблиц для указанного source_folder и даты.
+      operationId: downloadFiles
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: source_folder
+          in: query
+          required: true
+          description: Идентификатор кассы (например, 'P13' или 'P13/P13')
+          schema:
+            type: string
+            example: "P13"
+        - name: date
+          in: query
+          required: true
+          description: Дата в формате YYYY-MM-DD
+          schema:
+            type: string
+            format: date
+            example: "2024-12-01"
+      responses:
+        '200':
+          description: Файл успешно сгенерирован
+          content:
+            text/plain:
+              schema:
+                type: string
+                format: binary
+              example: |
+                #
+                1
+                100
+                123;01.12.2024;10:30:00;1;...
+          headers:
+            Content-Disposition:
+              description: Имя файла для скачивания
+              schema:
+                type: string
+                example: "attachment; filename=kassa_P13_2024-12-01.txt"
+        '400':
+          description: Неверные параметры запроса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                missingSourceFolder:
+                  value:
+                    error: "Missing required parameter: source_folder (string like 'P13' or 'P13/P13')"
+                missingDate:
+                  value:
+                    error: "Missing required parameter: date"
+                invalidDate:
+                  value:
+                    error: "Invalid date format. Expected YYYY-MM-DD"
+        '401':
+          description: Не авторизован
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Данные не найдены
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "No transactions found for the specified source_folder and date"
+        '503':
+          description: Очередь переполнена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/queue/status:
+    get:
+      tags:
+        - Monitoring
+      summary: Статус очереди запросов
+      description: |
+        Возвращает информацию о текущем состоянии очередей запросов.
+        Показывает размеры очередей для разных типов операций (load, download).
+      operationId: getQueueStatus
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Статус очереди
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueueStatus'
+              example:
+                total_queue_size: 5
+                timestamp: "2024-12-01T10:30:00Z"
+                load_queue_size: 3
+                download_queue_size: 2
+                active_operations: 2
+        '401':
+          description: Не авторизован
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/kassas:
+    get:
+      tags:
+        - Data
+      summary: Список доступных касс
+      description: |
+        Возвращает список всех доступных касс (source_folder) из базы данных.
+        Каждая касса представляет собой уникальный идентификатор папки на FTP сервере.
+      operationId: listKassas
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Список касс
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KassasList'
+              example:
+                source_folders:
+                  - "P13"
+                  - "N22"
+                  - "P13/P13"
+                count: 3
+        '401':
+          description: Не авторизован
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Внутренняя ошибка сервера
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/health:
+    get:
+      tags:
+        - Monitoring
+      summary: Проверка состояния сервера
+      description: |
+        Health check endpoint для проверки работоспособности сервера.
+        Не требует авторизации.
+      operationId: healthCheck
+      security: []
+      responses:
+        '200':
+          description: Сервер работает
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+              example:
+                status: "healthy"
+                timestamp: "2024-12-01T10:30:00Z"
+                service: "frontol-etl-webhook"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Bearer токен для авторизации. 
+        Передайте токен в заголовке Authorization: Bearer <token>
+
+  schemas:
+    WebhookRequest:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+          description: Дата в формате YYYY-MM-DD. Если не указана, используется текущая дата.
+          example: "2024-12-01"
+      additionalProperties: false
+
+    WebhookResponse:
+      type: object
+      required:
+        - status
+        - date
+      properties:
+        status:
+          type: string
+          description: Статус запроса
+          enum: [queued, processing, completed, failed]
+          example: "queued"
+        date:
+          type: string
+          format: date
+          description: Дата обработки
+          example: "2024-12-01"
+        message:
+          type: string
+          description: Сообщение о статусе
+          example: "Request added to queue"
+        request_id:
+          type: string
+          description: Уникальный идентификатор запроса
+          example: "req_1703123456789"
+
+    QueueStatus:
+      type: object
+      required:
+        - total_queue_size
+        - timestamp
+        - load_queue_size
+        - download_queue_size
+        - active_operations
+      properties:
+        total_queue_size:
+          type: integer
+          description: Общий размер всех очередей
+          example: 5
+        timestamp:
+          type: string
+          format: date-time
+          description: Время получения статуса
+          example: "2024-12-01T10:30:00Z"
+        load_queue_size:
+          type: integer
+          description: Размер очереди операций загрузки (load)
+          example: 3
+        download_queue_size:
+          type: integer
+          description: Размер очереди операций выгрузки (download)
+          example: 2
+        active_operations:
+          type: integer
+          description: Количество активных типов операций
+          example: 2
+
+    KassasList:
+      type: object
+      required:
+        - source_folders
+        - count
+      properties:
+        source_folders:
+          type: array
+          items:
+            type: string
+          description: Список идентификаторов касс
+          example: ["P13", "N22", "P13/P13"]
+        count:
+          type: integer
+          description: Количество касс
+          example: 3
+
+    HealthStatus:
+      type: object
+      required:
+        - status
+        - timestamp
+        - service
+      properties:
+        status:
+          type: string
+          description: Статус сервера
+          enum: [healthy, unhealthy]
+          example: "healthy"
+        timestamp:
+          type: string
+          format: date-time
+          description: Время проверки
+          example: "2024-12-01T10:30:00Z"
+        service:
+          type: string
+          description: Название сервиса
+          example: "frontol-etl-webhook"
+
+    Error:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Описание ошибки
+          example: "Invalid date format. Expected YYYY-MM-DD"
+
+    WebhookReport:
+      type: object
+      description: |
+        Отчет о выполнении ETL pipeline, отправляемый на webhook URL после завершения обработки.
+        Отправляется автоматически на URL, указанный в переменной окружения `WEBHOOK_REPORT_URL`.
+      required:
+        - request_id
+        - date
+        - status
+        - start_time
+        - success
+        - files_processed
+        - files_skipped
+        - transactions_loaded
+        - errors
+      properties:
+        request_id:
+          type: string
+          description: Уникальный идентификатор запроса, полученный при вызове /api/load
+          example: "req_1703123456789"
+        date:
+          type: string
+          format: date
+          description: Дата обработки данных
+          example: "2024-12-01"
+        status:
+          type: string
+          description: Статус выполнения ETL pipeline
+          enum: [processing, completed, failed, timeout]
+          example: "completed"
+        start_time:
+          type: string
+          format: date-time
+          description: Время начала выполнения ETL pipeline
+          example: "2024-12-01T10:30:00Z"
+        end_time:
+          type: string
+          format: date-time
+          description: Время завершения выполнения ETL pipeline
+          example: "2024-12-01T10:35:00Z"
+        duration:
+          type: string
+          description: Длительность выполнения в формате Go duration (например, "5m0s", "1h23m45s")
+          example: "5m0s"
+        files_processed:
+          type: integer
+          description: Количество обработанных файлов
+          example: 15
+        files_skipped:
+          type: integer
+          description: Количество пропущенных файлов (уже обработанных ранее)
+          example: 3
+        transactions_loaded:
+          type: integer
+          description: Общее количество загруженных транзакций
+          example: 1250
+        errors:
+          type: integer
+          description: Количество ошибок при обработке
+          example: 0
+        success:
+          type: boolean
+          description: Флаг успешного завершения ETL pipeline
+          example: true
+        error_message:
+          type: string
+          description: Сообщение об ошибке (присутствует только при ошибках)
+          example: "Failed to connect to FTP server"
+        transaction_details:
+          type: array
+          description: Детальная статистика по типам транзакций (опционально)
+          items:
+            $ref: '#/components/schemas/TransactionTypeStats'
+          example:
+            - table_name: "transaction_registration"
+              count: 850
+            - table_name: "special_price"
+              count: 120
+            - table_name: "bonus_transactions"
+              count: 280
+      examples:
+        success:
+          summary: Успешное выполнение
+          value:
+            request_id: "req_1703123456789"
+            date: "2024-12-01"
+            status: "completed"
+            start_time: "2024-12-01T10:30:00Z"
+            end_time: "2024-12-01T10:35:00Z"
+            duration: "5m0s"
+            files_processed: 15
+            files_skipped: 3
+            transactions_loaded: 1250
+            errors: 0
+            success: true
+            transaction_details:
+              - table_name: "transaction_registration"
+                count: 850
+              - table_name: "special_price"
+                count: 120
+              - table_name: "bonus_transactions"
+                count: 280
+        failed:
+          summary: Выполнение с ошибкой
+          value:
+            request_id: "req_1703123456790"
+            date: "2024-12-01"
+            status: "failed"
+            start_time: "2024-12-01T11:00:00Z"
+            end_time: "2024-12-01T11:02:30Z"
+            duration: "2m30s"
+            files_processed: 5
+            files_skipped: 0
+            transactions_loaded: 0
+            errors: 1
+            success: false
+            error_message: "Failed to connect to FTP server: connection timeout"
+        timeout:
+          summary: Таймаут выполнения
+          value:
+            request_id: "req_1703123456791"
+            date: "2024-12-01"
+            status: "timeout"
+            start_time: "2024-12-01T12:00:00Z"
+            end_time: "2024-12-01T12:30:00Z"
+            duration: "30m0s"
+            files_processed: 8
+            files_skipped: 2
+            transactions_loaded: 450
+            errors: 0
+            success: false
+            error_message: "Pipeline execution timeout reached"
+
+    TransactionTypeStats:
+      type: object
+      description: Статистика по количеству транзакций определенного типа
+      required:
+        - table_name
+        - count
+      properties:
+        table_name:
+          type: string
+          description: Название таблицы в базе данных
+          example: "transaction_registration"
+        count:
+          type: integer
+          description: Количество транзакций в таблице
+          example: 850

@@ -1,0 +1,38 @@
+# Production overrides
+services:
+  ftp-server:
+    # Remove port exposure in production (use internal network)
+    ports: []
+    restart: unless-stopped
+
+  webhook-server:
+    environment:
+      # Production settings
+      LOG_LEVEL: info
+      BATCH_SIZE: 1000
+      MAX_RETRIES: 3
+      WAIT_DELAY_MINUTES: 1
+      # Override with production values
+      DB_PASSWORD: ${DB_PASSWORD:-secure_password_change_me}
+      FTP_PASSWORD: ${FTP_PASSWORD:-secure_ftp_password_change_me}
+      WEBHOOK_REPORT_URL: ${WEBHOOK_REPORT_URL:-}
+    # Remove port exposure in production (use reverse proxy)
+    ports: []
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+  loader:
+    environment:
+      # Production settings
+      LOG_LEVEL: info
+      BATCH_SIZE: 1000
+      MAX_RETRIES: 3
+      WAIT_DELAY_MINUTES: 1
+      # Override with production values
+      DB_PASSWORD: ${DB_PASSWORD:-secure_password_change_me}
+      FTP_PASSWORD: ${FTP_PASSWORD:-secure_ftp_password_change_me}

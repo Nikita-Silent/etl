@@ -1,0 +1,178 @@
+# Конфигурация golangci-lint для проекта Frontol ETL
+# Документация: https://golangci-lint.run/usage/configuration/
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+  modules-download-mode: readonly
+
+output:
+  formats:
+    colored-line-number: stdout
+  print-issued-lines: true
+  print-linter-name: true
+  sort-results: true
+
+linters:
+  disable-all: true
+  enable:
+    # Обязательные линтеры
+    - errcheck        # Проверка обработки ошибок
+    - govet           # Проверка Go конструкций
+    - ineffassign     # Неиспользуемые присваивания
+    - staticcheck     # Статический анализ
+    - unused          # Неиспользуемый код
+    
+    # Качество кода
+    - misspell        # Проверка орфографии
+    - unconvert       # Лишние конверсии типов
+    - bodyclose       # Проверка закрытия HTTP body
+    - nilerr          # Возврат nil при наличии ошибки
+    
+    # Безопасность
+    - gosec           # Проверка безопасности
+    
+    # Стиль
+    - revive          # Гибкий линтер стиля
+    - gocritic        # Рекомендации по улучшению кода
+
+  exclusions:
+    paths:
+      - vendor
+      - third_party
+    rules:
+      # Разрешаем fmt.Printf в main и тестах
+      - path: cmd/
+        linters:
+          - forbidigo
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+          - gocritic
+          - revive
+
+      # Игнорируем unused для старого/резервного кода
+      - linters:
+          - unused
+        text: "(parseTransactionRegistrationOld|parseAstuExchangeTransaction|processFile|buildTransactionLine|formatFloatForLine|formatInt64ForLine)"
+
+      # Игнорируем unusedwrite для структур с JSON маппингом
+      - linters:
+          - govet
+        text: "unusedwrite"
+
+      # Игнорируем shadow для простых err переменных
+      - linters:
+          - govet
+        text: "shadow.*err"
+
+      # Разрешаем упрощенные стилистические конструкции
+      - linters:
+          - gocritic
+        text: "(paramTypeCombine|unnamedResult|equalFold|emptyStringTest|octalLiteral|sprintfQuotedString|exitAfterDefer)"
+
+      # Игнорируем revive warnings для экспортируемых имен с повторениями
+      - linters:
+          - revive
+        text: "(FTPClient|PipelineResult|empty-block)"
+      - linters:
+          - revive
+        text: "package-comments"
+      - linters:
+          - revive
+        text: "exported"
+      - linters:
+          - revive
+        text: "unused-parameter"
+      - linters:
+          - revive
+        text: "var-naming"
+
+      # Игнорируем nilerr для специфичных случаев обработки
+      - linters:
+          - nilerr
+        path: pkg/ftp/ftp\.go
+
+      # Игнорируем staticcheck SA5011 для проверенных nil указателей
+      - linters:
+          - staticcheck
+        text: "SA5011"
+
+formatters:
+  enable:
+    - gofmt           # Форматирование кода
+    - goimports       # Форматирование импортов
+  exclusions:
+    paths:
+      - vendor
+      - third_party
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    check-blank: false  # Разрешаем явное игнорирование через _
+    exclude-functions:
+      - (io.Closer).Close
+      - (*os.File).Close
+      - (net.Conn).Close
+
+  govet:
+    enable-all: true
+    disable:
+      - fieldalignment  # Выравнивание полей может усложнить читаемость
+
+  staticcheck:
+    checks:
+      - all
+      - -SA1019  # Разрешаем deprecated (для обратной совместимости)
+
+  gosec:
+    excludes:
+      - G104  # Игнорируем ошибки defer (уже проверяем через errcheck)
+      - G304  # Разрешаем чтение файлов по переменным путям
+      - G114  # Используем http.Server без таймаутов (webhook сервер)
+      - G306  # Разрешаем запись файлов с правами 0644
+
+  revive:
+    severity: warning
+    rules:
+      - name: blank-imports
+      - name: context-as-argument
+      - name: context-keys-type
+      - name: dot-imports
+      - name: error-return
+      - name: error-strings
+      - name: error-naming
+      - name: if-return
+      - name: increment-decrement
+      - name: var-declaration
+      - name: range
+      - name: receiver-naming
+      - name: time-naming
+      - name: unexported-return
+      - name: indent-error-flow
+      - name: errorf
+      - name: empty-block
+      - name: superfluous-else
+      - name: unreachable-code
+      - name: redefines-builtin-id
+
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - style
+      - performance
+    disabled-checks:
+      - hugeParam       # Структуры могут быть большими
+      - rangeValCopy    # Иногда нужна копия
+      - commentedOutCode
+
+  misspell:
+    locale: US
+
+issues:
+  # Показывать все проблемы
+  max-issues-per-linter: 0
+  max-same-issues: 0

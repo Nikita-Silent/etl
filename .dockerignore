@@ -1,0 +1,54 @@
+# Git
+.git
+.gitignore
+
+# Documentation
+*.md
+docs/
+
+# Docker files
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+.cache/
+
+# Build artifacts (will be built in container)
+frontol-loader
+webhook-server
+frontol-loader-local
+parser-test
+send-request
+clear-requests
+loader
+main
+migrate
+*.test
+coverage.out
+coverage.html
+*.prof
+*.pprof
+
+# Test data (if any)
+test-data/
+
+# Local env and data artifacts
+.env
+data/*.txt

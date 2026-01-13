@@ -1,0 +1,21 @@
+# Development overrides
+services:
+  webhook-server:
+    environment:
+      # Development settings
+      LOG_LEVEL: debug
+      BATCH_SIZE: 10
+      MAX_RETRIES: 1
+      WAIT_DELAY_MINUTES: 1
+    volumes:
+      - app_data:/tmp/frontol
+
+  loader:
+    environment:
+      # Development settings
+      LOG_LEVEL: debug
+      BATCH_SIZE: 10
+      MAX_RETRIES: 1
+      WAIT_DELAY_MINUTES: 1
+    volumes:
+      - app_data:/tmp/frontol
