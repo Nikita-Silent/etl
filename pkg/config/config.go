@@ -66,6 +66,9 @@ func LoadConfig() (*models.Config, error) {
 		QueueDeclareOnPublish:   getEnvAsBool("QUEUE_DECLARE_ON_PUBLISH", true),
 		QueueProvider:           strings.ToLower(getEnv("QUEUE_PROVIDER", "rabbitmq")),
 		RabbitMQManagementURL:   getEnv("RABBITMQ_MANAGEMENT_URL", "http://rabbitmq:15672"),
+		QueueDLQRequeueEnabled:  getEnvAsBool("QUEUE_DLQ_REQUEUE_ENABLED", false),
+		QueueDLQRequeueMinAge:   time.Duration(getEnvAsInt("QUEUE_DLQ_REQUEUE_MIN_AGE_SECONDS", 300)) * time.Second,
+		QueueDLQRequeueBatch:    getEnvAsInt("QUEUE_DLQ_REQUEUE_BATCH", 50),
 	}
 
 	// Validate configuration
@@ -213,6 +216,12 @@ func ValidateConfig(cfg *models.Config) error {
 		if cfg.QueueDLQRequeueInterval <= 0 {
 			return fmt.Errorf("QUEUE_DLQ_REQUEUE_INTERVAL_SECONDS must be positive, got %v", cfg.QueueDLQRequeueInterval)
 		}
+	}
+	if cfg.QueueDLQRequeueBatch < 1 {
+		return fmt.Errorf("QUEUE_DLQ_REQUEUE_BATCH must be at least 1, got %d", cfg.QueueDLQRequeueBatch)
+	}
+	if cfg.QueueDLQRequeueMinAge < 0 {
+		return fmt.Errorf("QUEUE_DLQ_REQUEUE_MIN_AGE_SECONDS must be non-negative, got %v", cfg.QueueDLQRequeueMinAge)
 	}
 
 	return nil

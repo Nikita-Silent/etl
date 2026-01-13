@@ -55,6 +55,9 @@ type Config struct {
 	QueueDeclareOnPublish   bool
 	QueueProvider           string // rabbitmq | memory (for gradual rollout)
 	RabbitMQManagementURL   string
+	QueueDLQRequeueEnabled  bool
+	QueueDLQRequeueMinAge   time.Duration
+	QueueDLQRequeueBatch    int
 }
 
 // KassaFolder represents a kassa folder structure

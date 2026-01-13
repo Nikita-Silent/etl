@@ -498,6 +498,73 @@ func (s *Server) rabbitMQQueueStats(ctx context.Context) (map[string]int, error)
 	return stats, nil
 }
 
+// requeueDLQHandler triggers DLQ requeue manually.
+func (s *Server) requeueDLQHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.queueProvider != "rabbitmq" {
+		http.Error(w, "RabbitMQ provider is disabled", http.StatusBadRequest)
+		return
+	}
+	if !s.config.QueueDLQRequeueEnabled {
+		http.Error(w, "DLQ requeue is disabled by config", http.StatusForbidden)
+		return
+	}
+
+	ctx := r.Context()
+	q := r.URL.Query()
+	op := q.Get("operation")
+	cashbox := q.Get("cashbox")
+	if op == "" {
+		op = string(OperationTypeLoad)
+	}
+	if cashbox == "" {
+		cashbox = "default"
+	}
+
+	minAge := s.config.QueueDLQRequeueMinAge
+	if ageStr := q.Get("min_age_seconds"); ageStr != "" {
+		if v, err := strconv.Atoi(ageStr); err == nil {
+			minAge = time.Duration(v) * time.Second
+		}
+	}
+	batch := s.config.QueueDLQRequeueBatch
+	if batchStr := q.Get("batch"); batchStr != "" {
+		if v, err := strconv.Atoi(batchStr); err == nil && v > 0 {
+			batch = v
+		}
+	}
+
+	qs := queue.BuildQueueSet(op, cashbox)
+	requeuer := queue.DLQRequeuer{
+		Client: s.amqpClient,
+	}
+	count, err := requeuer.Requeue(ctx, qs, minAge, batch)
+	if err != nil {
+		s.logger.Error("DLQ requeue failed",
+			"queue", qs.DLQ,
+			"error", err.Error(),
+			"event", "dlq_requeue_failed",
+		)
+		http.Error(w, fmt.Sprintf("requeue failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	resp := map[string]interface{}{
+		"queue":        qs.DLQ,
+		"requeued":     count,
+		"min_age":      minAge.String(),
+		"batch":        batch,
+		"operation":    op,
+		"cashbox":      cashbox,
+		"queue_target": qs.PrimaryQueue,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
 // NewServer создает новый экземпляр сервера
 func NewServer(cfg *models.Config) *Server {
 	// Create structured logger
@@ -1568,7 +1635,8 @@ func (s *Server) Run() error {
 	http.HandleFunc("/api/load", bearerAuth(s.webhookHandler))             // POST - загрузка данных из FTP в БД
 	http.HandleFunc("/api/files", bearerAuth(s.downloadHandler))           // GET - выгрузка данных из БД в файл
 	http.HandleFunc("/api/queue/status", bearerAuth(s.queueStatusHandler)) // GET - статус очереди
-	http.HandleFunc("/api/kassas", bearerAuth(s.listKassasHandler))        // GET - список касс
+	http.HandleFunc("/api/queue/requeue-dlq", bearerAuth(s.requeueDLQHandler))
+	http.HandleFunc("/api/kassas", bearerAuth(s.listKassasHandler)) // GET - список касс
 	// Health check (без авторизации)
 	http.HandleFunc("/api/health", s.healthHandler)
 

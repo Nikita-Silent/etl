@@ -187,15 +187,29 @@ Host: localhost:$SERVER_PORT
 - `rabbitmq_status` — `ok` или сообщение об ошибке (когда провайдер `rabbitmq`)
 - `rabbitmq` — объект с агрегатами брокера (появляется при `rabbitmq_status=ok`):
   - `total` — суммарное количество сообщений в очередях
-  - `per_operation` — суммы по операциям (например, `load`)
-  - `queues` — карта `queueName -> messages` (формат `etl.<operation>.<cashbox>`)
-  - Источник данных: management API (`RABBITMQ_MANAGEMENT_URL`, basic auth генерируется вместе с брокером); при ошибках — пассивный declare очередей.
+- `per_operation` — суммы по операциям (например, `load`)
+- `queues` — карта `queueName -> messages` (формат `etl.<operation>.<cashbox>`)
+- Источник данных: management API (`RABBITMQ_MANAGEMENT_URL`, basic auth генерируется вместе с брокером); при ошибках — пассивный declare очередей.
 
 > Note: операции `download` пока обрабатываются in-memory, поэтому в RabbitMQ отчитываются только очереди `load`.
 
 ---
 
-#### 7. GET /api/kassas
+#### 7. POST /api/queue/requeue-dlq
+
+Ручной перезапуск сообщений из DLQ в основную очередь.
+
+Параметры query (опционально):
+- `operation` — `load` (по умолчанию)
+- `cashbox` — имя кассы/папки (по умолчанию `default`)
+- `min_age_seconds` — минимальный возраст сообщения в DLQ (по умолчанию `QUEUE_DLQ_REQUEUE_MIN_AGE_SECONDS`)
+- `batch` — максимум сообщений за один вызов (по умолчанию `QUEUE_DLQ_REQUEUE_BATCH`)
+
+Требует Bearer auth и `QUEUE_DLQ_REQUEUE_ENABLED=true`. Возвращает JSON с количеством requeued.
+
+---
+
+#### 8. GET /api/kassas
 
 Список доступных касс (source_folder).
 Подробная схема ответа — в `api/openapi.yaml`.
