@@ -88,7 +88,7 @@ type QueueItem struct {
 	Date          string
 	OperationType OperationType // Тип операции: load или download
 	SourceFolder  string        // Для операций download - папка кассы
-	Logger        *slog.Logger
+	Logger        *logger.Logger
 	CreatedAt     time.Time
 	// Для download операций также нужен ResponseWriter и Request для отправки ответа
 	DownloadWriter  http.ResponseWriter
@@ -153,7 +153,7 @@ type RequestQueueManager struct {
 // Server представляет веб-сервер
 type Server struct {
 	config       *models.Config
-	logger       *slog.Logger
+	logger       *logger.Logger
 	queueManager *RequestQueueManager
 	workerStop   chan struct{}
 	workerWg     sync.WaitGroup
@@ -315,7 +315,7 @@ func NewServer(cfg *models.Config) *Server {
 
 	server := &Server{
 		config:       cfg,
-		logger:       loggerInstance.With("component", "webhook-server"),
+		logger:       loggerInstance.WithComponent("webhook-server"),
 		queueManager: NewRequestQueueManager(100), // Очередь на 100 запросов для каждой даты
 		workerStop:   make(chan struct{}),
 	}
@@ -573,7 +573,7 @@ func (s *Server) webhookHandler(w http.ResponseWriter, r *http.Request) {
 	// Генерируем ID запроса для отслеживания
 	requestID := fmt.Sprintf("req_%d", time.Now().UnixNano())
 	ctx := r.Context()
-	log := s.logger.With("request_id", requestID)
+	log := s.logger.WithRequestID(requestID)
 
 	log.InfoContext(ctx, "Received webhook request",
 		"event", "webhook_request",
@@ -689,7 +689,7 @@ func (s *Server) webhookHandler(w http.ResponseWriter, r *http.Request) {
 //   - По таймауту (если настроен WEBHOOK_TIMEOUT_MINUTES > 0)
 //
 // Что произойдет раньше - то и отправит уведомление
-func (s *Server) runETLPipeline(requestID, date string, log *slog.Logger) {
+func (s *Server) runETLPipeline(requestID, date string, log *logger.Logger) {
 	ctx := context.Background()
 	startTime := time.Now()
 	report := &WebhookReport{
@@ -719,7 +719,7 @@ func (s *Server) runETLPipeline(requestID, date string, log *slog.Logger) {
 			pipelineDone <- true
 		}()
 
-		result, err := pipeline.Run(ctx, log, s.config, date)
+		result, err := pipeline.Run(ctx, log.Logger, s.config, date)
 
 		reportMutex.Lock()
 		if err != nil {
@@ -1124,7 +1124,7 @@ func (s *Server) queueStatusHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	log := s.logger.With("request_id", r.Header.Get("X-Request-ID"))
+	log := s.logger.WithRequestID(r.Header.Get("X-Request-ID"))
 
 	log.InfoContext(ctx, "Queue status request received",
 		"event", "queue_status_request",
@@ -1156,7 +1156,7 @@ func (s *Server) listKassasHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	log := s.logger.With("request_id", r.Header.Get("X-Request-ID"))
+	log := s.logger.WithRequestID(r.Header.Get("X-Request-ID"))
 
 	log.InfoContext(ctx, "List source folders request received",
 		"event", "list_source_folders_request",
@@ -1217,7 +1217,7 @@ func (s *Server) downloadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	log := s.logger.With("request_id", r.Header.Get("X-Request-ID"))
+	log := s.logger.WithRequestID(r.Header.Get("X-Request-ID"))
 
 	// Получаем параметры из query string
 	sourceFolder := r.URL.Query().Get("source_folder")
@@ -1257,7 +1257,7 @@ func (s *Server) downloadHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Генерируем ID запроса для отслеживания
 	requestID := fmt.Sprintf("req_%d", time.Now().UnixNano())
-	log = log.With("request_id", requestID)
+	log = log.WithRequestID(requestID)
 
 	log.InfoContext(ctx, "Download request received",
 		"source_folder", sourceFolder,
@@ -1305,7 +1305,7 @@ func (s *Server) downloadHandler(w http.ResponseWriter, r *http.Request) {
 // Run запускает веб-сервер
 func (s *Server) Run() error {
 	// Создаем middleware для Bearer авторизации
-	bearerAuth := auth.BearerAuthMiddleware(s.logger, s.config.WebhookBearerToken)
+	bearerAuth := auth.BearerAuthMiddleware(s.logger.Logger, s.config.WebhookBearerToken)
 
 	// Настраиваем маршруты с Bearer авторизацией
 	// API эндпоинты
