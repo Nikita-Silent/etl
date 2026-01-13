@@ -430,10 +430,40 @@ func (s *Server) flattenCashboxes() []string {
 	return cashboxes
 }
 
+func (s *Server) fetchMgmtQueueStats() (map[string]int, error) {
+	client := queue.ManagementClient{
+		BaseURL:  s.config.RabbitMQManagementURL,
+		Username: s.config.RabbitMQUser,
+		Password: s.config.RabbitMQPassword,
+	}
+	queues, err := client.ListQueues("etl.")
+	if err != nil {
+		return nil, err
+	}
+	stats := make(map[string]int)
+	for _, q := range queues {
+		stats[q.Name] = q.Messages
+	}
+	return stats, nil
+}
+
 func (s *Server) rabbitMQQueueStats(ctx context.Context) (map[string]int, error) {
 	if s.amqpClient == nil {
 		return nil, fmt.Errorf("amqp client not initialized")
 	}
+
+	// Try management API first for consolidated metrics.
+	if s.config.RabbitMQManagementURL != "" && s.config.RabbitMQUser != "" {
+		stats, err := s.fetchMgmtQueueStats()
+		if err == nil {
+			return stats, nil
+		}
+		s.logger.Warn("RabbitMQ management API failed, falling back to passive declare",
+			"error", err.Error(),
+			"event", "rabbitmq_mgmt_fallback",
+		)
+	}
+
 	ch, err := s.amqpClient.OpenChannel()
 	if err != nil {
 		return nil, err

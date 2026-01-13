@@ -65,6 +65,7 @@ func LoadConfig() (*models.Config, error) {
 		QueueDLQRequeueInterval: time.Duration(getEnvAsInt("QUEUE_DLQ_REQUEUE_INTERVAL_SECONDS", 600)) * time.Second,
 		QueueDeclareOnPublish:   getEnvAsBool("QUEUE_DECLARE_ON_PUBLISH", true),
 		QueueProvider:           strings.ToLower(getEnv("QUEUE_PROVIDER", "rabbitmq")),
+		RabbitMQManagementURL:   getEnv("RABBITMQ_MANAGEMENT_URL", "http://rabbitmq:15672"),
 	}
 
 	// Validate configuration

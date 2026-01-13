@@ -189,6 +189,7 @@ Host: localhost:$SERVER_PORT
   - `total` — суммарное количество сообщений в очередях
   - `per_operation` — суммы по операциям (например, `load`)
   - `queues` — карта `queueName -> messages` (формат `etl.<operation>.<cashbox>`)
+  - Источник данных: management API (`RABBITMQ_MANAGEMENT_URL`, basic auth генерируется вместе с брокером); при ошибках — пассивный declare очередей.
 
 > Note: операции `download` пока обрабатываются in-memory, поэтому в RabbitMQ отчитываются только очереди `load`.
 
