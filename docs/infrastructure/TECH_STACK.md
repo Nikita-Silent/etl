@@ -94,7 +94,8 @@ COMMIT;
 | `net/http` | HTTP server и client |
 | `os`, `io`, `bufio` | Работа с файлами |
 | `time` | Работа с датой и временем |
-| `log/slog` | Structured logging (новое в Go 1.21+) |
+| `github.com/rs/zerolog` | Основной backend structured logging (JSON/console) |
+| `log/slog` | Фолбэк backend (временный, через feature-flag `LOG_BACKEND`) |
 
 ### Third-Party Libraries
 
