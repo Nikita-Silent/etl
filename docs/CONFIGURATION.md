@@ -125,6 +125,37 @@ LOG_LEVEL=info
 
 ---
 
+### RabbitMQ
+
+> Секреты не коммитим: сгенерируйте `.env.rabbitmq` командой `bash scripts/gen-rabbitmq-credentials.sh` (файл уже в `.gitignore`).
+
+| Переменная | Обязательно | По умолчанию | Описание |
+|------------|-------------|--------------|----------|
+| `RABBITMQ_HOST` | ✅ Да | `rabbitmq` | Хост RabbitMQ внутри docker-сети |
+| `RABBITMQ_PORT` | ❌ Нет | `5672` | AMQP порт |
+| `RABBITMQ_VHOST` | ❌ Нет | `/` | VHost |
+| `RABBITMQ_DEFAULT_USER` | ✅ Да | - | Пользователь RabbitMQ (берем из `.env.rabbitmq`) |
+| `RABBITMQ_DEFAULT_PASS` | ✅ Да | - | Пароль RabbitMQ (берем из `.env.rabbitmq`) |
+| `RABBITMQ_URL` | ❌ Нет | - | AMQP URL, если нужен одной строкой |
+| `RABBITMQ_MANAGEMENT_URL` | ❌ Нет | `http://rabbitmq:15672` | Внутренний URL management API |
+| `RABBITMQ_PREFETCH` | ❌ Нет | `1` | Prefetch для потребителей (строго по очереди) |
+| `QUEUE_RETRY_MAX` | ❌ Нет | `5` | Максимум ретраев до DLQ |
+| `QUEUE_RETRY_BACKOFFS` | ❌ Нет | `60000,300000,...` | CSV в миллисекундах для TTL retry |
+| `QUEUE_DLQ_REQUEUE_INTERVAL_SECONDS` | ❌ Нет | `600` | Период фона для requeue DLQ (будет использован сервисом) |
+| `QUEUE_DECLARE_ON_PUBLISH` | ❌ Нет | `true` | Создавать очереди лениво при публикации |
+| `QUEUE_PROVIDER` | ❌ Нет | `rabbitmq` | `rabbitmq` или `memory` (по умолчанию rabbitmq; `download` пока остается в in-memory очереди) |
+
+**Минимальный пример (.env + .env.rabbitmq):**
+
+```bash
+RABBITMQ_HOST=rabbitmq
+RABBITMQ_PORT=5672
+RABBITMQ_VHOST=/
+# Далее значения будут подтянуты из .env.rabbitmq
+```
+
+---
+
 ### Webhook Server
 
 | Переменная | Обязательно | По умолчанию | Описание |

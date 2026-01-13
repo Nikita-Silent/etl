@@ -1,7 +1,7 @@
 # Frontol 6 ETL Loader
 
-[![CI](https://github.com/user/go-frontol-loader/workflows/CI/badge.svg)](https://github.com/user/go-frontol-loader/actions/workflows/ci.yml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/user/go-frontol-loader)](https://goreportcard.com/report/github.com/user/go-frontol-loader)
+[![CI](https://github.com/Nikita-Silent/etl/workflows/CI/badge.svg)](https://github.com/Nikita-Silent/etl/actions/workflows/ci.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/user/go-frontol-loader)](https://goreportcard.com/report/github.com/Nikita-Silent/etl)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Go Version](https://img.shields.io/badge/Go-1.24-blue)](https://go.dev/)
 
@@ -31,6 +31,7 @@ ETL pipeline for processing Frontol 6 export files and loading them into Postgre
 ```bash
 # 1. Setup env
 cp env.example .env
+bash scripts/gen-rabbitmq-credentials.sh  # writes .env.rabbitmq with random creds
 
 # 2. Start services (migrations run automatically)
 docker compose up -d

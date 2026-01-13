@@ -188,10 +188,16 @@ func TestLoadConfig_Validation(t *testing.T) {
 	origDBPass := os.Getenv("DB_PASSWORD")
 	origFTPUser := os.Getenv("FTP_USER")
 	origFTPPass := os.Getenv("FTP_PASSWORD")
+	origRMQUser := os.Getenv("RABBITMQ_DEFAULT_USER")
+	origRMQPass := os.Getenv("RABBITMQ_DEFAULT_PASS")
+	origRMQHost := os.Getenv("RABBITMQ_HOST")
 	defer func() {
 		os.Setenv("DB_PASSWORD", origDBPass)
 		os.Setenv("FTP_USER", origFTPUser)
 		os.Setenv("FTP_PASSWORD", origFTPPass)
+		os.Setenv("RABBITMQ_DEFAULT_USER", origRMQUser)
+		os.Setenv("RABBITMQ_DEFAULT_PASS", origRMQPass)
+		os.Setenv("RABBITMQ_HOST", origRMQHost)
 	}()
 
 	tests := []struct {
@@ -240,6 +246,10 @@ func TestLoadConfig_Validation(t *testing.T) {
 			os.Setenv("DB_PASSWORD", tt.dbPass)
 			os.Setenv("FTP_USER", tt.ftpUser)
 			os.Setenv("FTP_PASSWORD", tt.ftpPass)
+			os.Setenv("RABBITMQ_DEFAULT_USER", "rabbit")
+			os.Setenv("RABBITMQ_DEFAULT_PASS", "rabbitpass")
+			os.Setenv("RABBITMQ_HOST", "rabbitmq")
+			os.Setenv("QUEUE_DLQ_REQUEUE_INTERVAL_SECONDS", "600")
 
 			_, err := LoadConfig()
 
@@ -284,9 +294,11 @@ func TestValidateConfig(t *testing.T) {
 			name: "valid config",
 			modifyFn: func(t *testing.T) map[string]string {
 				return map[string]string{
-					"DB_PASSWORD":  "pass",
-					"FTP_USER":     "user",
-					"FTP_PASSWORD": "pass",
+					"DB_PASSWORD":           "pass",
+					"FTP_USER":              "user",
+					"FTP_PASSWORD":          "pass",
+					"RABBITMQ_DEFAULT_USER": "rabbit",
+					"RABBITMQ_DEFAULT_PASS": "pass",
 				}
 			},
 			wantErr: false,
@@ -295,10 +307,12 @@ func TestValidateConfig(t *testing.T) {
 			name: "invalid DB_PORT (too low)",
 			modifyFn: func(t *testing.T) map[string]string {
 				return map[string]string{
-					"DB_PASSWORD":  "pass",
-					"FTP_USER":     "user",
-					"FTP_PASSWORD": "pass",
-					"DB_PORT":      "0",
+					"DB_PASSWORD":           "pass",
+					"FTP_USER":              "user",
+					"FTP_PASSWORD":          "pass",
+					"DB_PORT":               "0",
+					"RABBITMQ_DEFAULT_USER": "rabbit",
+					"RABBITMQ_DEFAULT_PASS": "pass",
 				}
 			},
 			wantErr:   true,
@@ -388,7 +402,10 @@ func TestValidateConfig(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Save original env vars
 			envBackup := make(map[string]string)
-			envKeys := []string{"DB_PASSWORD", "FTP_USER", "FTP_PASSWORD", "DB_PORT", "BATCH_SIZE", "MAX_RETRIES", "LOG_LEVEL"}
+			envKeys := []string{
+				"DB_PASSWORD", "FTP_USER", "FTP_PASSWORD", "DB_PORT", "BATCH_SIZE", "MAX_RETRIES", "LOG_LEVEL",
+				"RABBITMQ_DEFAULT_USER", "RABBITMQ_DEFAULT_PASS", "RABBITMQ_HOST", "QUEUE_DLQ_REQUEUE_INTERVAL_SECONDS",
+			}
 			for _, key := range envKeys {
 				envBackup[key] = os.Getenv(key)
 				os.Unsetenv(key)
@@ -402,6 +419,20 @@ func TestValidateConfig(t *testing.T) {
 					}
 				}
 			}()
+
+			// Base required envs
+			baseEnv := map[string]string{
+				"DB_PASSWORD":                        "pass",
+				"FTP_USER":                           "user",
+				"FTP_PASSWORD":                       "pass",
+				"RABBITMQ_DEFAULT_USER":              "rabbit",
+				"RABBITMQ_DEFAULT_PASS":              "rabbitpass",
+				"RABBITMQ_HOST":                      "rabbitmq",
+				"QUEUE_DLQ_REQUEUE_INTERVAL_SECONDS": "600",
+			}
+			for k, v := range baseEnv {
+				os.Setenv(k, v)
+			}
 
 			// Set test env vars
 			envVars := tt.modifyFn(t)
