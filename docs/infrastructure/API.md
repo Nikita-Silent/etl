@@ -173,6 +173,7 @@ Host: localhost:$SERVER_PORT
 
 Выгрузка данных из БД в файл по параметрам `source_folder` и `date`.
 Подробная схема запроса и ответов — в `api/openapi.yaml`.
+> Endpoint синхронный: ответ стримится сразу, поэтому операция обрабатывается в in-memory очереди процесса.
 
 ---
 
@@ -180,6 +181,10 @@ Host: localhost:$SERVER_PORT
 
 Статус очереди обработки запросов.
 Подробная схема ответа — в `api/openapi.yaml`.
+
+**Поля ответа (фактическая реализация):**
+- `queue_provider` — `memory`
+- `total_queue_size`, `load_queue_size`, `download_queue_size`, `active_operations` — состояние in-memory очередей.
 
 ---
 

@@ -23,9 +23,10 @@ func main() {
 
 	// Initialize logger
 	log := logger.New(logger.Config{
-		Level:  cfg.LogLevel,
-		Format: "text",
-		Output: os.Stdout,
+		Level:   cfg.LogLevel,
+		Format:  "text",
+		Output:  os.Stdout,
+		Backend: os.Getenv("LOG_BACKEND"),
 	})
 
 	// Create FTP driver

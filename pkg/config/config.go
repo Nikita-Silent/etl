@@ -43,6 +43,7 @@ func LoadConfig() (*models.Config, error) {
 		WaitDelayMinutes: time.Duration(getEnvAsInt("WAIT_DELAY_MINUTES", 1)) * time.Minute,
 		WorkerPoolSize:   getEnvAsInt("WORKER_POOL_SIZE", 10),
 		LogLevel:         getEnv("LOG_LEVEL", "info"),
+		LogBackend:       getEnv("LOG_BACKEND", "zerolog"),
 
 		// Webhook server settings
 		ServerPort:            getEnvAsInt("SERVER_PORT", 8080),
@@ -151,6 +152,20 @@ func ValidateConfig(cfg *models.Config) error {
 	}
 	if !validLogLevels[strings.ToLower(cfg.LogLevel)] {
 		return fmt.Errorf("LOG_LEVEL must be one of: debug, info, warn, error; got %s", cfg.LogLevel)
+	}
+
+	backend := strings.ToLower(cfg.LogBackend)
+	if backend == "" {
+		backend = "zerolog"
+		cfg.LogBackend = backend
+	}
+
+	validBackends := map[string]bool{
+		"zerolog": true,
+		"slog":    true,
+	}
+	if !validBackends[backend] {
+		return fmt.Errorf("LOG_BACKEND must be one of: zerolog, slog; got %s", cfg.LogBackend)
 	}
 
 	return nil

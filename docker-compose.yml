@@ -104,7 +104,7 @@ services:
       RETRY_DELAY_SECONDS: 5
       WAIT_DELAY_MINUTES: 1
       LOG_LEVEL: info
-      
+
       # Webhook Configuration
       SERVER_PORT: ${SERVER_PORT:-8080}
       WEBHOOK_REPORT_URL: ${WEBHOOK_REPORT_URL:-}

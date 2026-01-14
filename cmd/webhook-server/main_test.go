@@ -47,7 +47,7 @@ func newTestServer(t *testing.T, token string) *Server {
 
 func newTestMux(s *Server) *http.ServeMux {
 	mux := http.NewServeMux()
-	bearerAuth := auth.BearerAuthMiddleware(s.logger, s.config.WebhookBearerToken)
+	bearerAuth := auth.BearerAuthMiddleware(s.logger.Logger, s.config.WebhookBearerToken)
 
 	mux.HandleFunc("/api/load", bearerAuth(s.webhookHandler))
 	mux.HandleFunc("/api/files", bearerAuth(s.downloadHandler))

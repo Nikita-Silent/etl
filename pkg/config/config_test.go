@@ -388,7 +388,9 @@ func TestValidateConfig(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Save original env vars
 			envBackup := make(map[string]string)
-			envKeys := []string{"DB_PASSWORD", "FTP_USER", "FTP_PASSWORD", "DB_PORT", "BATCH_SIZE", "MAX_RETRIES", "LOG_LEVEL"}
+			envKeys := []string{
+				"DB_PASSWORD", "FTP_USER", "FTP_PASSWORD", "DB_PORT", "BATCH_SIZE", "MAX_RETRIES", "LOG_LEVEL",
+			}
 			for _, key := range envKeys {
 				envBackup[key] = os.Getenv(key)
 				os.Unsetenv(key)
@@ -402,6 +404,16 @@ func TestValidateConfig(t *testing.T) {
 					}
 				}
 			}()
+
+			// Base required envs
+			baseEnv := map[string]string{
+				"DB_PASSWORD":  "pass",
+				"FTP_USER":     "user",
+				"FTP_PASSWORD": "pass",
+			}
+			for k, v := range baseEnv {
+				os.Setenv(k, v)
+			}
 
 			// Set test env vars
 			envVars := tt.modifyFn(t)

@@ -37,7 +37,7 @@
 - Прием HTTP POST запросов для запуска ETL
 - Health check endpoint
 - Graceful shutdown
-- Structured logging (slog)
+- Structured logging (zerolog по умолчанию, фолбэк на slog через `LOG_BACKEND`)
 - Интерактивная API документация (Scalar)
 
 **Endpoints:**
@@ -78,6 +78,14 @@
 
 #### 2.3 Clear Requests (`cmd/clear-requests/`)
 **Назначение:** Очистка папок request/response на FTP
+
+---
+
+### 3. Инфраструктура
+
+- **PostgreSQL (внешний кластер)** — хранилище данных ETL.
+- **FTP сервер (`ftp-server`)** — источник файлов Frontol.
+- **In-memory очереди** — последовательная обработка запросов внутри `webhook-server` по типам операций (load/download), без внешнего брокера.
 
 ---
 
@@ -352,6 +360,10 @@ func (p *Pipeline) Run(ctx context.Context, date string) error {
 │  │  Webhook Server │──────────────────┘                      │
 │  │  - HTTP API     │                                         │
 │  │  - Graceful ⚡   │                                         │
+│  │  - Logging:     │                                         │
+│  │    Zerolog (by  │                                         │
+│  │    default),    │                                         │
+│  │    slog fallback│                                         │
 │  └────────┬────────┘                                         │
 │           │                                                   │
 │           │ calls pkg/pipeline                               │
@@ -482,6 +494,7 @@ pkg/db            pkg/ftp
 - **Connection pooling** с pgx
 - **Batch insert** с ON CONFLICT для идемпотентности
 - **Индексы** на часто используемых полях
+- **Логирование**: Zerolog (JSON/console), фолбэк на slog через `LOG_BACKEND`; фильтрация логов по полю/allowlist через `LOG_FILTER_FIELD` + `LOG_FILTER_ALLOW`
 
 ### 2. File Processing
 - **Буферизованное чтение** файлов

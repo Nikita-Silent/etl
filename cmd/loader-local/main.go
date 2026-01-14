@@ -16,9 +16,10 @@ import (
 
 func main() {
 	defaultLogger := logger.New(logger.Config{
-		Level:  "info",
-		Format: "text",
-		Output: os.Stdout,
+		Level:   "info",
+		Format:  "text",
+		Output:  os.Stdout,
+		Backend: os.Getenv("LOG_BACKEND"),
 	})
 	slog.SetDefault(defaultLogger.Logger)
 
@@ -33,11 +34,12 @@ func main() {
 
 	// Create logger
 	loggerInstance := logger.New(logger.Config{
-		Level:  "info",
-		Format: "text",
-		Output: os.Stdout,
+		Level:   "info",
+		Format:  "text",
+		Output:  os.Stdout,
+		Backend: os.Getenv("LOG_BACKEND"),
 	})
-	log := loggerInstance.With("component", "loader-local")
+	log := loggerInstance.WithComponent("loader-local")
 
 	// Load configuration
 	cfg, err := config.LoadConfig()

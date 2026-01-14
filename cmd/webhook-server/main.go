@@ -23,6 +23,7 @@ import (
 	"github.com/user/go-frontol-loader/pkg/models"
 	"github.com/user/go-frontol-loader/pkg/pipeline"
 	"github.com/user/go-frontol-loader/pkg/repository"
+	"github.com/user/go-frontol-loader/pkg/server"
 	"github.com/user/go-frontol-loader/pkg/validation"
 )
 
@@ -88,7 +89,7 @@ type QueueItem struct {
 	Date          string
 	OperationType OperationType // Тип операции: load или download
 	SourceFolder  string        // Для операций download - папка кассы
-	Logger        *slog.Logger
+	Logger        *logger.Logger
 	CreatedAt     time.Time
 	// Для download операций также нужен ResponseWriter и Request для отправки ответа
 	DownloadWriter  http.ResponseWriter
@@ -153,7 +154,7 @@ type RequestQueueManager struct {
 // Server представляет веб-сервер
 type Server struct {
 	config       *models.Config
-	logger       *slog.Logger
+	logger       *logger.Logger
 	queueManager *RequestQueueManager
 	workerStop   chan struct{}
 	workerWg     sync.WaitGroup
@@ -303,19 +304,29 @@ func (rqm *RequestQueueManager) StopAll() {
 	}
 }
 
+// enqueue adds work to the in-memory operation queues.
+func (s *Server) enqueue(item *QueueItem) error {
+	if err := s.queueManager.Enqueue(item); err != nil {
+		return err
+	}
+	s.queueManager.StartWorkerForOperation(item.OperationType, s)
+	return nil
+}
+
 // NewServer создает новый экземпляр сервера
 func NewServer(cfg *models.Config) *Server {
 	// Create structured logger
 	loggerInstance := logger.New(logger.Config{
-		Level:  "info",
-		Format: "text",
-		Output: os.Stdout,
+		Level:   cfg.LogLevel,
+		Format:  "text",
+		Output:  os.Stdout,
+		Backend: cfg.LogBackend,
 	})
 	slog.SetDefault(loggerInstance.Logger)
 
 	server := &Server{
 		config:       cfg,
-		logger:       loggerInstance.With("component", "webhook-server"),
+		logger:       loggerInstance.WithComponent("webhook-server"),
 		queueManager: NewRequestQueueManager(100), // Очередь на 100 запросов для каждой даты
 		workerStop:   make(chan struct{}),
 	}
@@ -573,7 +584,7 @@ func (s *Server) webhookHandler(w http.ResponseWriter, r *http.Request) {
 	// Генерируем ID запроса для отслеживания
 	requestID := fmt.Sprintf("req_%d", time.Now().UnixNano())
 	ctx := r.Context()
-	log := s.logger.With("request_id", requestID)
+	log := s.logger.WithRequestID(requestID)
 
 	log.InfoContext(ctx, "Received webhook request",
 		"event", "webhook_request",
@@ -640,7 +651,7 @@ func (s *Server) webhookHandler(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:     time.Now(),
 	}
 
-	if err := s.queueManager.Enqueue(queueItem); err != nil {
+	if err := s.enqueue(queueItem); err != nil {
 		log.ErrorContext(ctx, "Failed to enqueue request",
 			"error", err.Error(),
 			"operation_type", OperationTypeLoad,
@@ -651,9 +662,6 @@ func (s *Server) webhookHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Service unavailable: queue is full", http.StatusServiceUnavailable)
 		return
 	}
-
-	// Запускаем воркер для этого типа операции (если еще не запущен)
-	s.queueManager.StartWorkerForOperation(OperationTypeLoad, s)
 
 	// Отвечаем клиенту немедленно
 	response := WebhookResponse{
@@ -689,7 +697,7 @@ func (s *Server) webhookHandler(w http.ResponseWriter, r *http.Request) {
 //   - По таймауту (если настроен WEBHOOK_TIMEOUT_MINUTES > 0)
 //
 // Что произойдет раньше - то и отправит уведомление
-func (s *Server) runETLPipeline(requestID, date string, log *slog.Logger) {
+func (s *Server) runETLPipeline(requestID, date string, log *logger.Logger) {
 	ctx := context.Background()
 	startTime := time.Now()
 	report := &WebhookReport{
@@ -719,7 +727,7 @@ func (s *Server) runETLPipeline(requestID, date string, log *slog.Logger) {
 			pipelineDone <- true
 		}()
 
-		result, err := pipeline.Run(ctx, log, s.config, date)
+		result, err := pipeline.Run(ctx, log.Logger, s.config, date)
 
 		reportMutex.Lock()
 		if err != nil {
@@ -1124,13 +1132,14 @@ func (s *Server) queueStatusHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	log := s.logger.With("request_id", r.Header.Get("X-Request-ID"))
+	log := s.logger.WithRequestID(r.Header.Get("X-Request-ID"))
 
 	log.InfoContext(ctx, "Queue status request received",
 		"event", "queue_status_request",
 	)
 
 	response := map[string]interface{}{
+		"queue_provider":      "memory",
 		"total_queue_size":    s.queueManager.GetTotalSize(),
 		"timestamp":           time.Now().Format(time.RFC3339),
 		"load_queue_size":     s.queueManager.GetQueueSize(OperationTypeLoad),
@@ -1156,7 +1165,7 @@ func (s *Server) listKassasHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	log := s.logger.With("request_id", r.Header.Get("X-Request-ID"))
+	log := s.logger.WithRequestID(r.Header.Get("X-Request-ID"))
 
 	log.InfoContext(ctx, "List source folders request received",
 		"event", "list_source_folders_request",
@@ -1217,7 +1226,7 @@ func (s *Server) downloadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	log := s.logger.With("request_id", r.Header.Get("X-Request-ID"))
+	log := s.logger.WithRequestID(r.Header.Get("X-Request-ID"))
 
 	// Получаем параметры из query string
 	sourceFolder := r.URL.Query().Get("source_folder")
@@ -1257,7 +1266,7 @@ func (s *Server) downloadHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Генерируем ID запроса для отслеживания
 	requestID := fmt.Sprintf("req_%d", time.Now().UnixNano())
-	log = log.With("request_id", requestID)
+	log = log.WithRequestID(requestID)
 
 	log.InfoContext(ctx, "Download request received",
 		"source_folder", sourceFolder,
@@ -1277,7 +1286,7 @@ func (s *Server) downloadHandler(w http.ResponseWriter, r *http.Request) {
 		DownloadRequest: r,
 	}
 
-	if err := s.queueManager.Enqueue(queueItem); err != nil {
+	if err := s.enqueue(queueItem); err != nil {
 		log.ErrorContext(ctx, "Failed to enqueue download request",
 			"error", err.Error(),
 			"operation_type", OperationTypeDownload,
@@ -1288,9 +1297,6 @@ func (s *Server) downloadHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Service unavailable: queue is full", http.StatusServiceUnavailable)
 		return
 	}
-
-	// Запускаем воркер для этого типа операции (если еще не запущен)
-	s.queueManager.StartWorkerForOperation(OperationTypeDownload, s)
 
 	log.InfoContext(ctx, "Download request added to operation queue",
 		"operation_type", OperationTypeDownload,
@@ -1305,23 +1311,29 @@ func (s *Server) downloadHandler(w http.ResponseWriter, r *http.Request) {
 // Run запускает веб-сервер
 func (s *Server) Run() error {
 	// Создаем middleware для Bearer авторизации
-	bearerAuth := auth.BearerAuthMiddleware(s.logger, s.config.WebhookBearerToken)
+	bearerAuth := auth.BearerAuthMiddleware(s.logger.Logger, s.config.WebhookBearerToken)
+
+	mux := http.NewServeMux()
 
 	// Настраиваем маршруты с Bearer авторизацией
 	// API эндпоинты
-	http.HandleFunc("/api/load", bearerAuth(s.webhookHandler))             // POST - загрузка данных из FTP в БД
-	http.HandleFunc("/api/files", bearerAuth(s.downloadHandler))           // GET - выгрузка данных из БД в файл
-	http.HandleFunc("/api/queue/status", bearerAuth(s.queueStatusHandler)) // GET - статус очереди
-	http.HandleFunc("/api/kassas", bearerAuth(s.listKassasHandler))        // GET - список касс
+	mux.HandleFunc("/api/load", bearerAuth(s.webhookHandler))             // POST - загрузка данных из FTP в БД
+	mux.HandleFunc("/api/files", bearerAuth(s.downloadHandler))           // GET - выгрузка данных из БД в файл
+	mux.HandleFunc("/api/queue/status", bearerAuth(s.queueStatusHandler)) // GET - статус очереди
+	mux.HandleFunc("/api/kassas", bearerAuth(s.listKassasHandler))        // GET - список касс
 	// Health check (без авторизации)
-	http.HandleFunc("/api/health", s.healthHandler)
+	mux.HandleFunc("/api/health", s.healthHandler)
 
 	// Документация API (без авторизации)
-	http.HandleFunc("/api/docs", s.docsHandler)
-	http.HandleFunc("/api/openapi.yaml", s.openAPIHandler)
+	mux.HandleFunc("/api/docs", s.docsHandler)
+	mux.HandleFunc("/api/openapi.yaml", s.openAPIHandler)
 
 	// Статические файлы (без авторизации)
-	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
+	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
+
+	handler := server.RequestIDMiddleware(mux)
+	handler = server.LoggingMiddleware(s.logger)(handler)
+	handler = server.RecoveryMiddleware(s.logger)(handler)
 
 	// Получаем порт из конфигурации
 	port := s.config.ServerPort
@@ -1366,7 +1378,7 @@ func (s *Server) Run() error {
 	// Запускаем сервер с таймаутами
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           nil,
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,
@@ -1377,9 +1389,10 @@ func (s *Server) Run() error {
 
 func main() {
 	defaultLogger := logger.New(logger.Config{
-		Level:  "info",
-		Format: "text",
-		Output: os.Stdout,
+		Level:   "info",
+		Format:  "text",
+		Output:  os.Stdout,
+		Backend: os.Getenv("LOG_BACKEND"),
 	})
 	slog.SetDefault(defaultLogger.Logger)
 

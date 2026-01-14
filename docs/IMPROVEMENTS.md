@@ -2925,7 +2925,7 @@ go mod download
 
 # Install tools
 echo "Installing development tools..."
-go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.8.0
 go install github.com/cosmtrek/air@latest  # Live reload
 go install github.com/golang-migrate/migrate/v4/cmd/migrate@latest
 
@@ -2999,7 +2999,7 @@ generate: ## Generate code (mocks, etc.)
 
 .PHONY: install-tools
 install-tools: ## Install development tools
-	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.8.0
 	go install gotest.tools/gotestsum@latest
 	go install github.com/cosmtrek/air@latest
 
