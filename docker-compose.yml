@@ -246,7 +246,6 @@ volumes:
     driver: local
   app_data:
     driver: local
-    driver: local
 
 networks:
   frontol-network:
