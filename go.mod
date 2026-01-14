@@ -10,7 +10,7 @@ require (
 	github.com/jlaffaye/ftp v0.2.0
 	github.com/joho/godotenv v1.5.1
 	github.com/rs/zerolog v1.34.0
-	github.com/spf13/afero v1.14.0
+	github.com/spf13/afero v1.15.0
 	github.com/testcontainers/testcontainers-go v0.40.0
 	golang.org/x/text v0.32.0
 )
