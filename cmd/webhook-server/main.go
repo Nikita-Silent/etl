@@ -1320,7 +1320,7 @@ func (s *Server) Run() error {
 	mux.HandleFunc("/api/load", bearerAuth(s.webhookHandler))             // POST - загрузка данных из FTP в БД
 	mux.HandleFunc("/api/files", bearerAuth(s.downloadHandler))           // GET - выгрузка данных из БД в файл
 	mux.HandleFunc("/api/queue/status", bearerAuth(s.queueStatusHandler)) // GET - статус очереди
-	mux.HandleFunc("/api/kassas", bearerAuth(s.listKassasHandler)) // GET - список касс
+	mux.HandleFunc("/api/kassas", bearerAuth(s.listKassasHandler))        // GET - список касс
 	// Health check (без авторизации)
 	mux.HandleFunc("/api/health", s.healthHandler)
 

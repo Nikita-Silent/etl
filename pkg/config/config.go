@@ -51,7 +51,6 @@ func LoadConfig() (*models.Config, error) {
 		WebhookTimeoutMinutes: getEnvAsInt("WEBHOOK_TIMEOUT_MINUTES", 0), // 0 = no timeout, send only on completion
 		WebhookBearerToken:    getEnv("WEBHOOK_BEARER_TOKEN", ""),        // Bearer token for webhook authorization
 		ShutdownTimeout:       time.Duration(getEnvAsInt("SHUTDOWN_TIMEOUT_SECONDS", 30)) * time.Second,
-
 	}
 
 	// Validate configuration
