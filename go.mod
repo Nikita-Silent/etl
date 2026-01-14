@@ -9,7 +9,6 @@ require (
 	github.com/jackc/pgx/v5 v5.5.4
 	github.com/jlaffaye/ftp v0.2.0
 	github.com/joho/godotenv v1.5.1
-	github.com/rabbitmq/amqp091-go v1.10.0
 	github.com/rs/zerolog v1.34.0
 	github.com/spf13/afero v1.14.0
 	github.com/testcontainers/testcontainers-go v0.40.0

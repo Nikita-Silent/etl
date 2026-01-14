@@ -40,24 +40,6 @@ type Config struct {
 	WebhookTimeoutMinutes int           // Timeout for sending webhook report (0 = no timeout, send only on completion)
 	WebhookBearerToken    string        // Bearer token for webhook authorization
 	ShutdownTimeout       time.Duration // Graceful shutdown timeout (default: 30 seconds)
-
-	// RabbitMQ settings
-	RabbitMQURL             string
-	RabbitMQHost            string
-	RabbitMQPort            int
-	RabbitMQVHost           string
-	RabbitMQUser            string
-	RabbitMQPassword        string
-	RabbitMQPrefetch        int
-	QueueRetryMax           int
-	QueueRetryBackoffs      []time.Duration // Parsed from CSV milliseconds
-	QueueDLQRequeueInterval time.Duration
-	QueueDeclareOnPublish   bool
-	QueueProvider           string // rabbitmq | memory (for gradual rollout)
-	RabbitMQManagementURL   string
-	QueueDLQRequeueEnabled  bool
-	QueueDLQRequeueMinAge   time.Duration
-	QueueDLQRequeueBatch    int
 }
 
 // KassaFolder represents a kassa folder structure

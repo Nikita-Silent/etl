@@ -85,13 +85,7 @@
 
 - **PostgreSQL (внешний кластер)** — хранилище данных ETL.
 - **FTP сервер (`ftp-server`)** — источник файлов Frontol.
-- **RabbitMQ (`rabbitmq`)** — брокер очередей для запросов webhook-сервера (по умолчанию активен через `QUEUE_PROVIDER=rabbitmq`):
-  - Топология: topic exchange `etl.requests`, delayed `etl.retry`, DLX `etl.dlx`.
-  - Очереди: `etl.<operation>.<cashbox>` + `*.retry` + `*.dlq`; биндинги по ключу `<op>.<cashbox>`.
-  - Политики: dead-letter из основной очереди в DLQ, TTL в retry с возвратом в основную.
-  - Подключение только из внутренней сети Compose, креды генерируются скриптом (`scripts/gen-rabbitmq-credentials.sh`).
-  - Провайдер очередей переключается env-переменной `QUEUE_PROVIDER` (`memory` по умолчанию; `rabbitmq` — при готовности потребителей).
-  - На текущей итерации консьюмер реализован для операций `load`; `download` остается на in-memory, т.к. стримит ответ в открытое HTTP соединение. Для миграции download нужно вводить асинхронный сценарий (отложенная выдача файла/ссылка) или другой UX.
+- **In-memory очереди** — последовательная обработка запросов внутри `webhook-server` по типам операций (load/download), без внешнего брокера.
 
 ---
 

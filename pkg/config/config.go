@@ -52,23 +52,6 @@ func LoadConfig() (*models.Config, error) {
 		WebhookBearerToken:    getEnv("WEBHOOK_BEARER_TOKEN", ""),        // Bearer token for webhook authorization
 		ShutdownTimeout:       time.Duration(getEnvAsInt("SHUTDOWN_TIMEOUT_SECONDS", 30)) * time.Second,
 
-		// RabbitMQ settings
-		RabbitMQURL:             getEnv("RABBITMQ_URL", ""),
-		RabbitMQHost:            getEnv("RABBITMQ_HOST", "rabbitmq"),
-		RabbitMQPort:            getEnvAsInt("RABBITMQ_PORT", 5672),
-		RabbitMQVHost:           getEnv("RABBITMQ_VHOST", "/"),
-		RabbitMQUser:            getEnv("RABBITMQ_DEFAULT_USER", ""),
-		RabbitMQPassword:        getEnv("RABBITMQ_DEFAULT_PASS", ""),
-		RabbitMQPrefetch:        getEnvAsInt("RABBITMQ_PREFETCH", 1),
-		QueueRetryMax:           getEnvAsInt("QUEUE_RETRY_MAX", 5),
-		QueueRetryBackoffs:      parseBackoffDurations(getEnv("QUEUE_RETRY_BACKOFFS", "60000,300000,900000,1800000,3600000")), // ms
-		QueueDLQRequeueInterval: time.Duration(getEnvAsInt("QUEUE_DLQ_REQUEUE_INTERVAL_SECONDS", 600)) * time.Second,
-		QueueDeclareOnPublish:   getEnvAsBool("QUEUE_DECLARE_ON_PUBLISH", true),
-		QueueProvider:           strings.ToLower(getEnv("QUEUE_PROVIDER", "rabbitmq")),
-		RabbitMQManagementURL:   getEnv("RABBITMQ_MANAGEMENT_URL", "http://rabbitmq:15672"),
-		QueueDLQRequeueEnabled:  getEnvAsBool("QUEUE_DLQ_REQUEUE_ENABLED", false),
-		QueueDLQRequeueMinAge:   time.Duration(getEnvAsInt("QUEUE_DLQ_REQUEUE_MIN_AGE_SECONDS", 300)) * time.Second,
-		QueueDLQRequeueBatch:    getEnvAsInt("QUEUE_DLQ_REQUEUE_BATCH", 50),
 	}
 
 	// Validate configuration
@@ -186,44 +169,6 @@ func ValidateConfig(cfg *models.Config) error {
 		return fmt.Errorf("LOG_BACKEND must be one of: zerolog, slog; got %s", cfg.LogBackend)
 	}
 
-	if cfg.QueueProvider != "rabbitmq" && cfg.QueueProvider != "memory" {
-		return fmt.Errorf("QUEUE_PROVIDER must be rabbitmq or memory, got %s", cfg.QueueProvider)
-	}
-	if cfg.QueueProvider == "rabbitmq" {
-		if cfg.RabbitMQURL == "" {
-			if cfg.RabbitMQHost == "" {
-				return fmt.Errorf("RABBITMQ_HOST is required when RABBITMQ_URL is not provided")
-			}
-			if cfg.RabbitMQUser == "" {
-				return fmt.Errorf("RABBITMQ_DEFAULT_USER is required when RABBITMQ_URL is not provided")
-			}
-			if cfg.RabbitMQPassword == "" {
-				return fmt.Errorf("RABBITMQ_DEFAULT_PASS is required when RABBITMQ_URL is not provided")
-			}
-			if cfg.RabbitMQPort < 1 || cfg.RabbitMQPort > 65535 {
-				return fmt.Errorf("RABBITMQ_PORT must be between 1 and 65535, got %d", cfg.RabbitMQPort)
-			}
-		}
-		if cfg.RabbitMQPrefetch < 1 {
-			return fmt.Errorf("RABBITMQ_PREFETCH must be at least 1, got %d", cfg.RabbitMQPrefetch)
-		}
-		if cfg.QueueRetryMax < 0 {
-			return fmt.Errorf("QUEUE_RETRY_MAX must be non-negative, got %d", cfg.QueueRetryMax)
-		}
-		if cfg.QueueRetryMax > 0 && len(cfg.QueueRetryBackoffs) == 0 {
-			return fmt.Errorf("QUEUE_RETRY_BACKOFFS must provide at least one value when QUEUE_RETRY_MAX > 0")
-		}
-		if cfg.QueueDLQRequeueInterval <= 0 {
-			return fmt.Errorf("QUEUE_DLQ_REQUEUE_INTERVAL_SECONDS must be positive, got %v", cfg.QueueDLQRequeueInterval)
-		}
-	}
-	if cfg.QueueDLQRequeueBatch < 1 {
-		return fmt.Errorf("QUEUE_DLQ_REQUEUE_BATCH must be at least 1, got %d", cfg.QueueDLQRequeueBatch)
-	}
-	if cfg.QueueDLQRequeueMinAge < 0 {
-		return fmt.Errorf("QUEUE_DLQ_REQUEUE_MIN_AGE_SECONDS must be non-negative, got %v", cfg.QueueDLQRequeueMinAge)
-	}
-
 	return nil
 }
 
@@ -297,44 +242,6 @@ func getEnvAsInt(key string, defaultValue int) int {
 		}
 	}
 	return defaultValue
-}
-
-func getEnvAsBool(key string, defaultValue bool) bool {
-	if value := os.Getenv(key); value != "" {
-		switch strings.ToLower(value) {
-		case "1", "true", "yes", "y", "on":
-			return true
-		case "0", "false", "no", "n", "off":
-			return false
-		}
-	}
-	return defaultValue
-}
-
-func parseBackoffDurations(csv string) []time.Duration {
-	if csv == "" {
-		return []time.Duration{time.Minute, 5 * time.Minute, 15 * time.Minute, 30 * time.Minute, time.Hour}
-	}
-	parts := strings.Split(csv, ",")
-	backoffs := make([]time.Duration, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		ms, err := strconv.Atoi(p)
-		if err != nil {
-			continue
-		}
-		if ms < 0 {
-			continue
-		}
-		backoffs = append(backoffs, time.Duration(ms)*time.Millisecond)
-	}
-	if len(backoffs) == 0 {
-		return []time.Duration{time.Minute, 5 * time.Minute, 15 * time.Minute, 30 * time.Minute, time.Hour}
-	}
-	return backoffs
 }
 
 // FTPConfig represents FTP server configuration

@@ -70,26 +70,6 @@ services:
     command: ["./ftp-server"]
     restart: unless-stopped
 
-  # RabbitMQ broker for request queues
-  rabbitmq:
-    image: rabbitmq:3.13-management-alpine
-    container_name: frontol-rabbitmq
-    env_file:
-      - .env.rabbitmq
-    environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-}
-    volumes:
-      - rabbitmq_data:/var/lib/rabbitmq
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
-      interval: 10s
-      timeout: 10s
-      retries: 5
-    networks:
-      - frontol-network
-    restart: unless-stopped
-
   # Webhook Server
   webhook-server:
     build: .
@@ -99,10 +79,6 @@ services:
         condition: service_completed_successfully
       ftp-server:
         condition: service_started
-      rabbitmq:
-        condition: service_healthy
-    env_file:
-      - .env.rabbitmq
     environment:
       # Database Configuration (external PostgreSQL cluster)
       DB_HOST: ${DB_HOST}
@@ -129,15 +105,6 @@ services:
       WAIT_DELAY_MINUTES: 1
       LOG_LEVEL: info
 
-      # RabbitMQ Configuration
-      RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
-      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
-      RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/}
-      RABBITMQ_USER: ${RABBITMQ_DEFAULT_USER:-}
-      RABBITMQ_PASSWORD: ${RABBITMQ_DEFAULT_PASS:-}
-      RABBITMQ_URL: ${RABBITMQ_URL:-}
-      RABBITMQ_MANAGEMENT_URL: ${RABBITMQ_MANAGEMENT_URL:-http://rabbitmq:15672}
-      
       # Webhook Configuration
       SERVER_PORT: ${SERVER_PORT:-8080}
       WEBHOOK_REPORT_URL: ${WEBHOOK_REPORT_URL:-}
@@ -279,7 +246,6 @@ volumes:
     driver: local
   app_data:
     driver: local
-  rabbitmq_data:
     driver: local
 
 networks:

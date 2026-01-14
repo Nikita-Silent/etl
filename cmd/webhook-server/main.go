@@ -15,7 +15,6 @@ import (
 	"time"
 
 	scalargo "github.com/bdpiprava/scalar-go"
-	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/user/go-frontol-loader/pkg/auth"
 	"github.com/user/go-frontol-loader/pkg/config"
 	"github.com/user/go-frontol-loader/pkg/db"
@@ -23,8 +22,8 @@ import (
 	"github.com/user/go-frontol-loader/pkg/logger"
 	"github.com/user/go-frontol-loader/pkg/models"
 	"github.com/user/go-frontol-loader/pkg/pipeline"
-	"github.com/user/go-frontol-loader/pkg/queue"
 	"github.com/user/go-frontol-loader/pkg/repository"
+	"github.com/user/go-frontol-loader/pkg/server"
 	"github.com/user/go-frontol-loader/pkg/validation"
 )
 
@@ -159,12 +158,6 @@ type Server struct {
 	queueManager *RequestQueueManager
 	workerStop   chan struct{}
 	workerWg     sync.WaitGroup
-
-	// RabbitMQ integration
-	queueProvider string
-	amqpClient    *queue.Client
-	consumerCtx   context.Context
-	consumerStop  context.CancelFunc
 }
 
 // NewRequestQueueManager создает новый менеджер очередей
@@ -311,264 +304,13 @@ func (rqm *RequestQueueManager) StopAll() {
 	}
 }
 
-// enqueue routes to the configured queue provider (rabbitmq or in-memory).
-func (s *Server) enqueue(ctx context.Context, item *QueueItem) error {
-	// Download endpoint streams response via in-process worker; keep in-memory queue until async consumer is added.
-	if item.OperationType == OperationTypeDownload {
-		if err := s.queueManager.Enqueue(item); err != nil {
-			return err
-		}
-		s.queueManager.StartWorkerForOperation(item.OperationType, s)
-		return nil
+// enqueue adds work to the in-memory operation queues.
+func (s *Server) enqueue(item *QueueItem) error {
+	if err := s.queueManager.Enqueue(item); err != nil {
+		return err
 	}
-
-	if s.queueProvider != "rabbitmq" || s.amqpClient == nil {
-		// In-memory legacy behavior
-		if err := s.queueManager.Enqueue(item); err != nil {
-			return err
-		}
-		s.queueManager.StartWorkerForOperation(item.OperationType, s)
-		return nil
-	}
-
-	// RabbitMQ publish path
-	cashbox := item.SourceFolder
-	if cashbox == "" {
-		cashbox = "default"
-	}
-
-	qs := queue.BuildQueueSet(string(item.OperationType), cashbox)
-	backoff := time.Minute
-	if len(s.config.QueueRetryBackoffs) > 0 {
-		backoff = s.config.QueueRetryBackoffs[0]
-	}
-
-	if err := s.amqpClient.DeclareQueues(qs, backoff, s.config.QueueDeclareOnPublish); err != nil {
-		return fmt.Errorf("declare topology: %w", err)
-	}
-
-	msg := map[string]string{
-		"request_id":     item.RequestID,
-		"date":           item.Date,
-		"operation_type": string(item.OperationType),
-		"source_folder":  item.SourceFolder,
-		"created_at":     item.CreatedAt.UTC().Format(time.RFC3339),
-	}
-	body, err := json.Marshal(msg)
-	if err != nil {
-		return fmt.Errorf("marshal message: %w", err)
-	}
-
-	headers := amqp.Table{
-		"x-retry-count": int32(0),
-		"x-first-seen":  time.Now().UTC().Format(time.RFC3339),
-	}
-
-	if err := s.amqpClient.Publish(ctx, qs.RoutingKey, body, headers); err != nil {
-		return fmt.Errorf("publish: %w", err)
-	}
-
+	s.queueManager.StartWorkerForOperation(item.OperationType, s)
 	return nil
-}
-
-func (s *Server) startRabbitConsumers() error {
-	// Derive AMQP URL
-	amqpURL := s.config.RabbitMQURL
-	if amqpURL == "" {
-		amqpURL = fmt.Sprintf("amqp://%s:%s@%s:%d%s", s.config.RabbitMQUser, s.config.RabbitMQPassword, s.config.RabbitMQHost, s.config.RabbitMQPort, s.config.RabbitMQVHost)
-	}
-
-	consumer := queue.NewConsumer(queue.ConsumerConfig{
-		URL:              amqpURL,
-		Prefetch:         s.config.RabbitMQPrefetch,
-		Backoffs:         s.config.QueueRetryBackoffs,
-		MaxRetries:       s.config.QueueRetryMax,
-		DeclareOnPublish: s.config.QueueDeclareOnPublish,
-	})
-
-	cashboxes := s.flattenCashboxes()
-	if len(cashboxes) == 0 {
-		cashboxes = []string{"default"}
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	s.consumerCtx = ctx
-	s.consumerStop = cancel
-
-	go func() {
-		if err := consumer.Start(ctx, cashboxes, func(c context.Context, msg queue.Message) error {
-			log := s.logger.WithRequestID(msg.RequestID)
-			queueItem := &QueueItem{
-				RequestID:     msg.RequestID,
-				Date:          msg.Date,
-				OperationType: OperationType(msg.OperationType),
-				SourceFolder:  msg.SourceFolder,
-				Logger:        log,
-				CreatedAt:     time.Now(),
-			}
-			if queueItem.OperationType == "" {
-				queueItem.OperationType = OperationTypeLoad
-			}
-			s.runETLPipeline(queueItem.RequestID, queueItem.Date, queueItem.Logger)
-			return nil
-		}); err != nil {
-			s.logger.Error("RabbitMQ consumer stopped with error",
-				"error", err.Error(),
-				"event", "rabbitmq_consumer_stopped",
-			)
-		}
-	}()
-
-	return nil
-}
-
-func (s *Server) flattenCashboxes() []string {
-	var cashboxes []string
-	for _, folders := range s.config.KassaStructure {
-		cashboxes = append(cashboxes, folders...)
-	}
-	return cashboxes
-}
-
-func (s *Server) fetchMgmtQueueStats() (map[string]int, error) {
-	client := queue.ManagementClient{
-		BaseURL:  s.config.RabbitMQManagementURL,
-		Username: s.config.RabbitMQUser,
-		Password: s.config.RabbitMQPassword,
-	}
-	queues, err := client.ListQueues("etl.")
-	if err != nil {
-		return nil, err
-	}
-	stats := make(map[string]int)
-	for _, q := range queues {
-		stats[q.Name] = q.Messages
-	}
-	return stats, nil
-}
-
-func (s *Server) rabbitMQQueueStats(ctx context.Context) (map[string]int, error) {
-	if s.amqpClient == nil {
-		return nil, fmt.Errorf("amqp client not initialized")
-	}
-
-	// Try management API first for consolidated metrics.
-	if s.config.RabbitMQManagementURL != "" && s.config.RabbitMQUser != "" {
-		stats, err := s.fetchMgmtQueueStats()
-		if err == nil {
-			return stats, nil
-		}
-		s.logger.Warn("RabbitMQ management API failed, falling back to passive declare",
-			"error", err.Error(),
-			"event", "rabbitmq_mgmt_fallback",
-		)
-	}
-
-	ch, err := s.amqpClient.OpenChannel()
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		_ = ch.Close()
-	}()
-
-	stats := make(map[string]int)
-	cashboxes := s.flattenCashboxes()
-	if len(cashboxes) == 0 {
-		cashboxes = []string{"default"}
-	}
-	ops := []OperationType{OperationTypeLoad}
-
-	for _, op := range ops {
-		for _, cashbox := range cashboxes {
-			qs := queue.BuildQueueSet(string(op), cashbox)
-			args := amqp.Table{
-				"x-dead-letter-exchange":    queue.ExchangeDLX,
-				"x-dead-letter-routing-key": qs.DLQRoutingKey,
-			}
-			info, err := ch.QueueDeclarePassive(qs.PrimaryQueue, true, false, false, false, args)
-			if err != nil {
-				if amqpErr, ok := err.(*amqp.Error); ok && amqpErr.Code == amqp.NotFound {
-					s.logger.Warn("Queue not found in RabbitMQ stats",
-						"queue", qs.PrimaryQueue,
-						"event", "rabbitmq_queue_missing",
-					)
-					continue
-				}
-				return nil, fmt.Errorf("inspect queue %s: %w", qs.PrimaryQueue, err)
-			}
-			stats[qs.PrimaryQueue] = info.Messages
-		}
-	}
-
-	return stats, nil
-}
-
-// requeueDLQHandler triggers DLQ requeue manually.
-func (s *Server) requeueDLQHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if s.queueProvider != "rabbitmq" {
-		http.Error(w, "RabbitMQ provider is disabled", http.StatusBadRequest)
-		return
-	}
-	if !s.config.QueueDLQRequeueEnabled {
-		http.Error(w, "DLQ requeue is disabled by config", http.StatusForbidden)
-		return
-	}
-
-	ctx := r.Context()
-	q := r.URL.Query()
-	op := q.Get("operation")
-	cashbox := q.Get("cashbox")
-	if op == "" {
-		op = string(OperationTypeLoad)
-	}
-	if cashbox == "" {
-		cashbox = "default"
-	}
-
-	minAge := s.config.QueueDLQRequeueMinAge
-	if ageStr := q.Get("min_age_seconds"); ageStr != "" {
-		if v, err := strconv.Atoi(ageStr); err == nil {
-			minAge = time.Duration(v) * time.Second
-		}
-	}
-	batch := s.config.QueueDLQRequeueBatch
-	if batchStr := q.Get("batch"); batchStr != "" {
-		if v, err := strconv.Atoi(batchStr); err == nil && v > 0 {
-			batch = v
-		}
-	}
-
-	qs := queue.BuildQueueSet(op, cashbox)
-	requeuer := queue.DLQRequeuer{
-		Client: s.amqpClient,
-	}
-	count, err := requeuer.Requeue(ctx, qs, minAge, batch)
-	if err != nil {
-		s.logger.Error("DLQ requeue failed",
-			"queue", qs.DLQ,
-			"error", err.Error(),
-			"event", "dlq_requeue_failed",
-		)
-		http.Error(w, fmt.Sprintf("requeue failed: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	resp := map[string]interface{}{
-		"queue":        qs.DLQ,
-		"requeued":     count,
-		"min_age":      minAge.String(),
-		"batch":        batch,
-		"operation":    op,
-		"cashbox":      cashbox,
-		"queue_target": qs.PrimaryQueue,
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // NewServer создает новый экземпляр сервера
@@ -583,23 +325,10 @@ func NewServer(cfg *models.Config) *Server {
 	slog.SetDefault(loggerInstance.Logger)
 
 	server := &Server{
-		config:        cfg,
-		logger:        loggerInstance.WithComponent("webhook-server"),
-		queueManager:  NewRequestQueueManager(100), // Очередь на 100 запросов для каждой даты
-		workerStop:    make(chan struct{}),
-		queueProvider: cfg.QueueProvider,
-	}
-
-	if cfg.QueueProvider == "rabbitmq" {
-		amqpURL := cfg.RabbitMQURL
-		if amqpURL == "" {
-			amqpURL = fmt.Sprintf("amqp://%s:%s@%s:%d%s", cfg.RabbitMQUser, cfg.RabbitMQPassword, cfg.RabbitMQHost, cfg.RabbitMQPort, cfg.RabbitMQVHost)
-		}
-		server.amqpClient = queue.NewClient(queue.Config{
-			URL:       amqpURL,
-			Prefetch:  cfg.RabbitMQPrefetch,
-			Reconnect: 5 * time.Second,
-		})
+		config:       cfg,
+		logger:       loggerInstance.WithComponent("webhook-server"),
+		queueManager: NewRequestQueueManager(100), // Очередь на 100 запросов для каждой даты
+		workerStop:   make(chan struct{}),
 	}
 
 	return server
@@ -786,10 +515,6 @@ func (s *Server) Stop() {
 		"event", "server_stopping",
 	)
 
-	if s.consumerStop != nil {
-		s.consumerStop()
-	}
-
 	// Создаем контекст с таймаутом для graceful shutdown
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
@@ -926,7 +651,7 @@ func (s *Server) webhookHandler(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:     time.Now(),
 	}
 
-	if err := s.enqueue(ctx, queueItem); err != nil {
+	if err := s.enqueue(queueItem); err != nil {
 		log.ErrorContext(ctx, "Failed to enqueue request",
 			"error", err.Error(),
 			"operation_type", OperationTypeLoad,
@@ -959,7 +684,6 @@ func (s *Server) webhookHandler(w http.ResponseWriter, r *http.Request) {
 	log.InfoContext(ctx, "Request added to operation queue",
 		"operation_type", OperationTypeLoad,
 		"date", date,
-		"queue_provider", s.queueProvider,
 		"queue_size_for_operation", s.queueManager.GetQueueSize(OperationTypeLoad),
 		"total_queue_size", s.queueManager.GetTotalSize(),
 		"event", "request_queued",
@@ -1415,35 +1139,12 @@ func (s *Server) queueStatusHandler(w http.ResponseWriter, r *http.Request) {
 	)
 
 	response := map[string]interface{}{
-		"queue_provider":      s.queueProvider,
+		"queue_provider":      "memory",
 		"total_queue_size":    s.queueManager.GetTotalSize(),
 		"timestamp":           time.Now().Format(time.RFC3339),
 		"load_queue_size":     s.queueManager.GetQueueSize(OperationTypeLoad),
 		"download_queue_size": s.queueManager.GetQueueSize(OperationTypeDownload),
 		"active_operations":   s.queueManager.GetActiveOperationsCount(),
-	}
-
-	if s.queueProvider == "rabbitmq" {
-		stats, err := s.rabbitMQQueueStats(ctx)
-		if err != nil {
-			response["rabbitmq_status"] = fmt.Sprintf("error: %v", err)
-		} else {
-			response["rabbitmq_status"] = "ok"
-			perOp := map[string]int{}
-			total := 0
-			for q, count := range stats {
-				total += count
-				parts := strings.Split(q, ".")
-				if len(parts) >= 3 {
-					perOp[parts[1]] += count
-				}
-			}
-			response["rabbitmq"] = map[string]interface{}{
-				"queues":        stats,
-				"total":         total,
-				"per_operation": perOp,
-			}
-		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1585,7 +1286,7 @@ func (s *Server) downloadHandler(w http.ResponseWriter, r *http.Request) {
 		DownloadRequest: r,
 	}
 
-	if err := s.enqueue(ctx, queueItem); err != nil {
+	if err := s.enqueue(queueItem); err != nil {
 		log.ErrorContext(ctx, "Failed to enqueue download request",
 			"error", err.Error(),
 			"operation_type", OperationTypeDownload,
@@ -1612,46 +1313,27 @@ func (s *Server) Run() error {
 	// Создаем middleware для Bearer авторизации
 	bearerAuth := auth.BearerAuthMiddleware(s.logger.Logger, s.config.WebhookBearerToken)
 
-	// Lazy connect to RabbitMQ if configured
-	if s.queueProvider == "rabbitmq" && s.amqpClient != nil {
-		if err := s.amqpClient.Connect(); err != nil {
-			s.logger.Error("Failed to connect to RabbitMQ, falling back to in-memory queue",
-				"error", err.Error(),
-				"event", "rabbitmq_connect_error",
-			)
-			s.queueProvider = "memory"
-		} else {
-			s.logger.Info("RabbitMQ connected, using broker-backed queues",
-				"prefetch", s.config.RabbitMQPrefetch,
-				"event", "rabbitmq_connected",
-			)
-			// Start consumers for load queues
-			if err := s.startRabbitConsumers(); err != nil {
-				s.logger.Error("Failed to start RabbitMQ consumers, falling back to in-memory queue",
-					"error", err.Error(),
-					"event", "rabbitmq_consumer_error",
-				)
-				s.queueProvider = "memory"
-			}
-		}
-	}
+	mux := http.NewServeMux()
 
 	// Настраиваем маршруты с Bearer авторизацией
 	// API эндпоинты
-	http.HandleFunc("/api/load", bearerAuth(s.webhookHandler))             // POST - загрузка данных из FTP в БД
-	http.HandleFunc("/api/files", bearerAuth(s.downloadHandler))           // GET - выгрузка данных из БД в файл
-	http.HandleFunc("/api/queue/status", bearerAuth(s.queueStatusHandler)) // GET - статус очереди
-	http.HandleFunc("/api/queue/requeue-dlq", bearerAuth(s.requeueDLQHandler))
-	http.HandleFunc("/api/kassas", bearerAuth(s.listKassasHandler)) // GET - список касс
+	mux.HandleFunc("/api/load", bearerAuth(s.webhookHandler))             // POST - загрузка данных из FTP в БД
+	mux.HandleFunc("/api/files", bearerAuth(s.downloadHandler))           // GET - выгрузка данных из БД в файл
+	mux.HandleFunc("/api/queue/status", bearerAuth(s.queueStatusHandler)) // GET - статус очереди
+	mux.HandleFunc("/api/kassas", bearerAuth(s.listKassasHandler)) // GET - список касс
 	// Health check (без авторизации)
-	http.HandleFunc("/api/health", s.healthHandler)
+	mux.HandleFunc("/api/health", s.healthHandler)
 
 	// Документация API (без авторизации)
-	http.HandleFunc("/api/docs", s.docsHandler)
-	http.HandleFunc("/api/openapi.yaml", s.openAPIHandler)
+	mux.HandleFunc("/api/docs", s.docsHandler)
+	mux.HandleFunc("/api/openapi.yaml", s.openAPIHandler)
 
 	// Статические файлы (без авторизации)
-	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
+	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
+
+	handler := server.RequestIDMiddleware(mux)
+	handler = server.LoggingMiddleware(s.logger)(handler)
+	handler = server.RecoveryMiddleware(s.logger)(handler)
 
 	// Получаем порт из конфигурации
 	port := s.config.ServerPort
@@ -1696,7 +1378,7 @@ func (s *Server) Run() error {
 	// Запускаем сервер с таймаутами
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           nil,
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,

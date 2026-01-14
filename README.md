@@ -31,7 +31,6 @@ ETL pipeline for processing Frontol 6 export files and loading them into Postgre
 ```bash
 # 1. Setup env
 cp env.example .env
-bash scripts/gen-rabbitmq-credentials.sh  # writes .env.rabbitmq with random creds
 
 # 2. Start services (migrations run automatically)
 docker compose up -d
