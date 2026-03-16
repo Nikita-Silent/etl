@@ -104,9 +104,9 @@ services:
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:$SERVER_PORT/api/health"]
       interval: 30s
-      timeout: 10s
+      timeout: 30s
       retries: 3
-      start_period: 40s
+      start_period: 20s
 ```
 
 **Запуск:**
