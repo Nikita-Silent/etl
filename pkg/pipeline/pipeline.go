@@ -17,7 +17,6 @@ import (
 	"github.com/user/go-frontol-loader/pkg/models"
 	"github.com/user/go-frontol-loader/pkg/parser"
 	"github.com/user/go-frontol-loader/pkg/repository"
-	"github.com/user/go-frontol-loader/pkg/workers"
 )
 
 type fileLoader interface {
@@ -37,10 +36,7 @@ const (
 
 const maxErrorSamples = 5
 
-var (
-	processFilesFromFTPFunc = processFilesFromFTP
-	waitForResponsesFunc    = waitForResponses
-)
+var processFilesFromFTPFunc func(context.Context, ftp.FTPClient, fileLoader, *models.Config, string, *slog.Logger) (*ProcessingStats, error) = processFilesFromFTP
 
 type PipelineIssueSample struct {
 	Stage string `json:"stage"`
@@ -59,6 +55,8 @@ type KassaProcessingStats struct {
 	KassaCode        string `json:"kassa_code"`
 	FolderName       string `json:"folder_name"`
 	SourceFolder     string `json:"source_folder"`
+	Status           string `json:"status,omitempty"`
+	RequestPath      string `json:"request_path,omitempty"`
 	ResponsePath     string `json:"response_path"`
 	FilesFound       int    `json:"files_found"`
 	FilesQueued      int    `json:"files_queued"`
@@ -66,6 +64,9 @@ type KassaProcessingStats struct {
 	FilesSkipped     int    `json:"files_skipped"`
 	FilesRecovered   int    `json:"files_recovered,omitempty"`
 	FilesFailed      int    `json:"files_failed,omitempty"`
+	DeletedRequests  int    `json:"deleted_requests,omitempty"`
+	DeletedResponses int    `json:"deleted_responses,omitempty"`
+	LockWait         string `json:"lock_wait,omitempty"`
 	LastIssueStage   string `json:"last_issue_stage,omitempty"`
 	LastIssueMessage string `json:"last_issue_message,omitempty"`
 }
@@ -150,60 +151,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg *models.Config, date stri
 func runWithClients(ctx context.Context, logger *slog.Logger, cfg *models.Config, date string, ftpClient ftp.FTPClient, loader fileLoader, result *PipelineResult) (*PipelineResult, error) {
 	issues := newIssueCollector()
 
-	// Шаг 1: Очистка только request папок (response папки не очищаем, чтобы не удалить существующие файлы)
-	logger.InfoContext(ctx, "Step 1: Clearing request folders only (keeping response files)",
-		"event", "etl_step_1",
-	)
-	if err := ftpClient.ClearAllKassaRequestFolders(); err != nil {
-		issues.Record("clear_request_folders", "", "", err)
-		logger.WarnContext(ctx, "Failed to clear some request folders",
-			"error", err.Error(),
-			"event", "etl_step_1_warning",
-		)
-		// Не прерываем выполнение, продолжаем
-	} else {
-		logger.InfoContext(ctx, "Step 1: All request folders cleared successfully",
-			"event", "etl_step_1_complete",
-		)
-	}
-
-	// Шаг 2: Отправка request.txt файлов во все кассы
-	logger.InfoContext(ctx, "Step 2: Sending request.txt files to all kassas",
-		"date", date,
-		"event", "etl_step_2",
-	)
-	if err := ftpClient.SendRequestsToAllKassasWithDate(date); err != nil {
-		issues.Record("send_requests", "", "", err)
-		logger.WarnContext(ctx, "Failed to send some requests",
-			"error", err.Error(),
-			"event", "etl_step_2_warning",
-		)
-		// Не прерываем выполнение, продолжаем
-	} else {
-		logger.InfoContext(ctx, "Step 2: Request files sent successfully to all kassas",
-			"event", "etl_step_2_complete",
-		)
-	}
-
-	// Шаг 3: Ожидание генерации ответов
-	logger.InfoContext(ctx, "Step 3: Waiting for responses to be generated",
-		"wait_delay", cfg.WaitDelayMinutes.String(),
-		"event", "etl_step_3",
-	)
-	if err := waitForResponsesFunc(ctx, cfg.WaitDelayMinutes); err != nil {
-		result.ErrorMessage = fmt.Sprintf("Failed while waiting for responses: %v", err)
-		result.Errors = issues.Total()
-		result.ErrorBreakdown = issues.CloneBreakdown()
-		result.ErrorSamples = issues.CloneSamples()
-		logger.ErrorContext(ctx, "Failed while waiting for responses",
-			"error", err.Error(),
-			"event", "etl_step_3_error",
-		)
-		return result, err
-	}
-
-	// Шаг 4: Обработка файлов из FTP
-	logger.InfoContext(ctx, "Step 4: Processing files from FTP",
+	// Шаг 1: Координация загрузки по каждой папке отдельно.
+	logger.InfoContext(ctx, "Step 1: Coordinating per-folder FTP lifecycle",
 		"event", "etl_step_4",
 	)
 	logger.DebugContext(ctx, "FTP configuration",
@@ -212,20 +161,7 @@ func runWithClients(ctx context.Context, logger *slog.Logger, cfg *models.Config
 		"kassa_structure", fmt.Sprintf("%v", cfg.KassaStructure),
 	)
 
-	// Очищаем старые .processed файлы перед обработкой новых
-	logger.InfoContext(ctx, "Clearing old .processed files from response folders",
-		"event", "etl_clear_processed",
-	)
-	if err := ftpClient.ClearAllKassaResponseProcessedFiles(); err != nil {
-		issues.Record("clear_processed_files", "", "", err)
-		logger.WarnContext(ctx, "Failed to clear some processed files",
-			"error", err.Error(),
-			"event", "etl_clear_processed_warning",
-		)
-		// Не прерываем выполнение, продолжаем обработку
-	}
-
-	stats, err := processFilesFromFTPFunc(ctx, ftpClient, loader, cfg, logger)
+	stats, err := processFilesFromFTPFunc(ctx, ftpClient, loader, cfg, date, logger)
 	if err != nil {
 		result.ErrorMessage = fmt.Sprintf("Failed to process files from FTP: %v", err)
 		issues.Merge(stats)
@@ -298,12 +234,16 @@ func runWithClients(ctx context.Context, logger *slog.Logger, cfg *models.Config
 			"kassa_code", detail.KassaCode,
 			"folder_name", detail.FolderName,
 			"source_folder", detail.SourceFolder,
+			"status", detail.Status,
 			"files_found", detail.FilesFound,
 			"files_queued", detail.FilesQueued,
 			"files_processed", detail.FilesProcessed,
 			"files_skipped", detail.FilesSkipped,
 			"files_recovered", detail.FilesRecovered,
 			"files_failed", detail.FilesFailed,
+			"deleted_requests", detail.DeletedRequests,
+			"deleted_responses", detail.DeletedResponses,
+			"lock_wait", detail.LockWait,
 			"last_issue_stage", detail.LastIssueStage,
 			"event", "etl_kassa_summary",
 		)
@@ -323,6 +263,19 @@ type ProcessingStats struct {
 	ErrorSamples       []PipelineIssueSample
 	KassaDetails       []KassaProcessingStats
 	TransactionDetails []TransactionTypeStats // Детальная статистика по типам транзакций
+}
+
+type folderRunResult struct {
+	Detail             KassaProcessingStats
+	ErrorBreakdown     map[string]int
+	ErrorSamples       []PipelineIssueSample
+	TransactionDetails map[string]int
+}
+
+// fileTask сохранен для обратной совместимости тестов пакета pipeline.
+type fileTask struct {
+	folder models.KassaFolder
+	file   *ftplib.Entry
 }
 
 type fileProcessOutcome struct {
@@ -359,15 +312,8 @@ func stageForFileError(err error) string {
 	return "file_process_error"
 }
 
-// fileTask представляет задачу на обработку файла
-type fileTask struct {
-	folder models.KassaFolder
-	file   *ftplib.Entry
-}
-
-// processFilesFromFTP обрабатывает все файлы из FTP папок асинхронно
-func processFilesFromFTP(ctx context.Context, ftpClient ftp.FTPClient, loader fileLoader, cfg *models.Config, logger *slog.Logger) (*ProcessingStats, error) {
-	// Получаем все папки касс
+// processFilesFromFTP координирует полный цикл загрузки по каждой папке.
+func processFilesFromFTP(ctx context.Context, ftpClient ftp.FTPClient, loader fileLoader, cfg *models.Config, date string, logger *slog.Logger) (*ProcessingStats, error) {
 	folders := ftp.GetAllKassaFolders(cfg)
 
 	stats := &ProcessingStats{
@@ -377,14 +323,10 @@ func processFilesFromFTP(ctx context.Context, ftpClient ftp.FTPClient, loader fi
 		KassaDetails:       make([]KassaProcessingStats, 0),
 	}
 
-	// Мьютекс для защиты общих структур данных
 	var statsMutex sync.Mutex
-	var errorMutex sync.Mutex
-
-	// Map для агрегации статистики по типам транзакций
+	var wg sync.WaitGroup
 	transactionDetailsMap := make(map[string]int)
 	kassaDetailsMap := make(map[string]*KassaProcessingStats)
-	var totalFiles int
 	getKassaStats := func(folder models.KassaFolder) *KassaProcessingStats {
 		key := folder.KassaCode + "/" + folder.FolderName
 		if detail, ok := kassaDetailsMap[key]; ok {
@@ -394,200 +336,57 @@ func processFilesFromFTP(ctx context.Context, ftpClient ftp.FTPClient, loader fi
 			KassaCode:    folder.KassaCode,
 			FolderName:   folder.FolderName,
 			SourceFolder: key,
+			RequestPath:  folder.RequestPath,
 			ResponsePath: folder.ResponsePath,
 		}
 		kassaDetailsMap[key] = detail
 		return detail
 	}
-	recordError := func(stage string, file string, path string, err error) {
-		errorMutex.Lock()
-		defer errorMutex.Unlock()
-		stats.ErrorBreakdown[stage]++
-		if len(stats.ErrorSamples) >= maxErrorSamples {
-			return
-		}
-		sample := PipelineIssueSample{
-			Stage: stage,
-		}
-		if file != "" {
-			sample.File = file
-		}
-		if path != "" {
-			sample.Path = path
-		}
-		if err != nil {
-			sample.Error = err.Error()
-		}
-		stats.ErrorSamples = append(stats.ErrorSamples, sample)
-	}
 
 	logger.InfoContext(ctx, "Found kassa folders to process",
 		"count", len(folders),
+		"response_wait_delay", cfg.WaitDelayMinutes.String(),
+		"lock_retry_delay", cfg.RetryDelay.String(),
 		"event", "ftp_folders_found",
 	)
 
-	// Собираем все задачи на обработку файлов
-	var tasks []fileTask
-
 	for _, folder := range folders {
-		logger.InfoContext(ctx, "Scanning kassa folder",
-			"kassa_code", folder.KassaCode,
-			"folder_name", folder.FolderName,
-			"request_path", folder.RequestPath,
-			"response_path", folder.ResponsePath,
-			"event", "ftp_scanning_kassa",
-		)
-
-		// Список файлов в папке ответов
-		allFiles, err := ftpClient.ListFiles(folder.ResponsePath)
-		if err != nil {
-			logger.ErrorContext(ctx, "Failed to list files",
-				"path", folder.ResponsePath,
-				"error", err.Error(),
-				"event", "ftp_list_error",
-			)
-			statsMutex.Lock()
-			stats.Errors++
-			detail := getKassaStats(folder)
-			detail.FilesFailed++
-			detail.LastIssueStage = "ftp_list_error"
-			detail.LastIssueMessage = err.Error()
-			statsMutex.Unlock()
-			recordError("ftp_list_error", "", folder.ResponsePath, err)
-			continue
-		}
-
-		totalFiles += len(allFiles)
-
-		// Фильтруем необработанные файлы (O(n) вместо O(n²))
-		// Это делает один проход по списку вместо множественных FTP запросов
-		unprocessedFiles := ftp.FilterUnprocessedFiles(allFiles)
-
-		// Исключаем специальные файлы
-		unprocessedFiles = ftp.FilterFilesByName(unprocessedFiles, "SaveResult001.txt")
-
-		// Подсчитываем пропущенные файлы
-		skippedCount := len(allFiles) - len(unprocessedFiles)
-		if skippedCount > 0 {
-			statsMutex.Lock()
-			stats.FilesSkipped += skippedCount
-			getKassaStats(folder).FilesSkipped += skippedCount
-			statsMutex.Unlock()
-		}
-
-		statsMutex.Lock()
-		detail := getKassaStats(folder)
-		detail.FilesFound += len(allFiles)
-		detail.FilesQueued += len(unprocessedFiles)
-		statsMutex.Unlock()
-
-		logger.InfoContext(ctx, "Found files in response folder",
-			"path", folder.ResponsePath,
-			"total_files", len(allFiles),
-			"unprocessed_files", len(unprocessedFiles),
-			"skipped_files", skippedCount,
-			"event", "ftp_files_found",
-		)
-
-		if len(unprocessedFiles) > 0 {
-			fileNames := make([]string, len(unprocessedFiles))
-			for i, f := range unprocessedFiles {
-				fileNames[i] = f.Name
-			}
-			logger.DebugContext(ctx, "Unprocessed files",
-				"files", fileNames,
-			)
-		} else if len(allFiles) == 0 {
-			logger.WarnContext(ctx, "No files found in response folder",
-				"path", folder.ResponsePath,
-				"event", "ftp_no_files",
-			)
-		}
-
-		// Добавляем необработанные файлы в список задач
-		for _, file := range unprocessedFiles {
-			tasks = append(tasks, fileTask{
-				folder: folder,
-				file:   file,
-			})
-		}
-	}
-
-	logger.InfoContext(ctx, "Starting asynchronous file processing with worker pool",
-		"total_tasks", len(tasks),
-		"total_files_found", totalFiles,
-		"worker_pool_size", cfg.WorkerPoolSize,
-		"event", "async_processing_start",
-	)
-
-	// Создаем worker pool для ограничения количества параллельных операций
-	pool := workers.NewPool(cfg.WorkerPoolSize)
-
-	// Обрабатываем все файлы асинхронно через worker pool
-	for _, task := range tasks {
-		t := task // Capture loop variable
-		err := pool.Submit(ctx, func() error {
-			// Обрабатываем файл
-			outcome, err := processFile(ctx, ftpClient, loader, cfg, t.file.Name, t.folder, logger)
+		folder := folder
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			folderStats := processFolderLoad(ctx, ftpClient, loader, cfg, date, folder, logger)
 
 			statsMutex.Lock()
 			defer statsMutex.Unlock()
 
-			if err != nil {
-				logger.ErrorContext(ctx, "Failed to process file",
-					"file", t.file.Name,
-					"error", err.Error(),
-					"event", "file_process_error",
-				)
-				stats.Errors++
-				detail := getKassaStats(t.folder)
-				detail.FilesFailed++
-				detail.LastIssueStage = stageForFileError(err)
-				detail.LastIssueMessage = err.Error()
-				recordError(stageForFileError(err), t.file.Name, "", err)
-				return err
+			stats.FilesProcessed += folderStats.Detail.FilesProcessed
+			stats.FilesSkipped += folderStats.Detail.FilesSkipped
+			stats.FilesRecovered += folderStats.Detail.FilesRecovered
+			stats.TransactionsLoaded += 0
+			for _, count := range folderStats.TransactionDetails {
+				stats.TransactionsLoaded += count
+			}
+			for stage, count := range folderStats.ErrorBreakdown {
+				stats.ErrorBreakdown[stage] += count
+				stats.Errors += count
+			}
+			for _, sample := range folderStats.ErrorSamples {
+				if len(stats.ErrorSamples) >= maxErrorSamples {
+					break
+				}
+				stats.ErrorSamples = append(stats.ErrorSamples, sample)
 			}
 
-			stats.FilesProcessed++
-			detail := getKassaStats(t.folder)
-			detail.FilesProcessed++
-			stats.TransactionsLoaded += outcome.LoadedTransactions
-			if outcome.Recovered {
-				stats.FilesRecovered++
-				detail.FilesRecovered++
-			}
-
-			// Агрегируем детальную статистику
-			for _, detail := range outcome.TransactionDetails {
-				tableName, _ := detail["table_name"].(string)
-				count, _ := detail["count"].(int)
+			detail := getKassaStats(folder)
+			*detail = folderStats.Detail
+			for tableName, count := range folderStats.TransactionDetails {
 				transactionDetailsMap[tableName] += count
 			}
-
-			logger.InfoContext(ctx, "Successfully processed file",
-				"file", t.file.Name,
-				"transactions_loaded", outcome.LoadedTransactions,
-				"recovered", outcome.Recovered,
-				"event", "file_process_success",
-			)
-			return nil
-		})
-
-		if err != nil {
-			logger.ErrorContext(ctx, "Failed to submit file processing task",
-				"file", t.file.Name,
-				"error", err.Error(),
-				"event", "worker_submit_error",
-			)
-			statsMutex.Lock()
-			stats.Errors++
-			statsMutex.Unlock()
-			recordError("worker_submit_error", t.file.Name, "", err)
-		}
+		}()
 	}
 
-	// Ждем завершения всех workers
-	pool.Wait()
+	wg.Wait()
 
 	// Преобразуем агрегированную статистику в слайс
 	for tableName, count := range transactionDetailsMap {
@@ -606,7 +405,6 @@ func processFilesFromFTP(ctx context.Context, ftpClient ftp.FTPClient, loader fi
 	// Выводим финальную статистику
 	logger.InfoContext(ctx, "Processing statistics",
 		"log_kind", "loki_operational",
-		"total_files_found", totalFiles,
 		"files_processed", stats.FilesProcessed,
 		"files_skipped", stats.FilesSkipped,
 		"files_recovered", stats.FilesRecovered,
@@ -618,6 +416,185 @@ func processFilesFromFTP(ctx context.Context, ftpClient ftp.FTPClient, loader fi
 	)
 
 	return stats, nil
+}
+
+func processFolderLoad(ctx context.Context, ftpClient ftp.FTPClient, loader fileLoader, cfg *models.Config, date string, folder models.KassaFolder, logger *slog.Logger) folderRunResult {
+	sourceFolder := folder.KassaCode + "/" + folder.FolderName
+	result := folderRunResult{
+		Detail: KassaProcessingStats{
+			KassaCode:    folder.KassaCode,
+			FolderName:   folder.FolderName,
+			SourceFolder: sourceFolder,
+			Status:       "pending",
+			RequestPath:  folder.RequestPath,
+			ResponsePath: folder.ResponsePath,
+		},
+		ErrorBreakdown:     make(map[string]int),
+		TransactionDetails: make(map[string]int),
+	}
+
+	recordError := func(stage, file, path string, err error) {
+		result.ErrorBreakdown[stage]++
+		result.Detail.FilesFailed++
+		result.Detail.Status = stage
+		result.Detail.LastIssueStage = stage
+		if err != nil {
+			result.Detail.LastIssueMessage = err.Error()
+		}
+		if len(result.ErrorSamples) >= maxErrorSamples {
+			return
+		}
+		sample := PipelineIssueSample{Stage: stage}
+		if file != "" {
+			sample.File = file
+		}
+		if path != "" {
+			sample.Path = path
+		}
+		if err != nil {
+			sample.Error = err.Error()
+		}
+		result.ErrorSamples = append(result.ErrorSamples, sample)
+	}
+
+	releaseLock, lockWait, err := defaultFolderLocks.acquire(ctx, sourceFolder, cfg.RetryDelay, cfg.WaitDelayMinutes)
+	if err != nil {
+		recordError("folder_lock_error", "", folder.ResponsePath, err)
+		result.Detail.LockWait = lockWait.String()
+		return result
+	}
+	defer releaseLock()
+	result.Detail.LockWait = lockWait.String()
+	result.Detail.Status = "lock_acquired"
+
+	deletedResponses, err := cleanupFolderPath(ctx, ftpClient, folder.ResponsePath, sourceFolder, "response", logger)
+	if err != nil {
+		recordError("response_cleanup_failed", "", folder.ResponsePath, err)
+		return result
+	}
+	result.Detail.DeletedResponses = deletedResponses
+	result.Detail.Status = "response_cleaned"
+
+	remainingResponseFiles, err := ftpClient.ListFiles(folder.ResponsePath)
+	if err != nil {
+		recordError("response_preflight_failed", "", folder.ResponsePath, err)
+		return result
+	}
+	if len(remainingResponseFiles) > 0 {
+		recordError("response_preflight_failed", "", folder.ResponsePath, fmt.Errorf("response folder still contains %d files after cleanup", len(remainingResponseFiles)))
+		return result
+	}
+
+	deletedRequests, err := cleanupFolderPath(ctx, ftpClient, folder.RequestPath, sourceFolder, "request", logger)
+	if err != nil {
+		recordError("request_cleanup_failed", "", folder.RequestPath, err)
+		return result
+	}
+	result.Detail.DeletedRequests = deletedRequests
+	result.Detail.Status = "request_cleaned"
+
+	if err := ftpClient.SendRequestToKassa(folder, date); err != nil {
+		recordError("request_send_failed", "", folder.RequestPath, err)
+		return result
+	}
+	result.Detail.Status = "request_sent"
+
+	if err := waitForResponses(ctx, cfg.WaitDelayMinutes); err != nil {
+		recordError("response_wait_canceled", "", folder.ResponsePath, err)
+		return result
+	}
+	result.Detail.Status = "waiting_response"
+
+	allFiles, responseFiles, skippedFiles, err := listProcessableResponseFiles(ftpClient, folder.ResponsePath)
+	if err != nil {
+		recordError("response_list_failed", "", folder.ResponsePath, err)
+		return result
+	}
+
+	result.Detail.FilesFound = len(allFiles)
+	result.Detail.FilesSkipped = skippedFiles
+	result.Detail.FilesQueued = len(responseFiles)
+
+	if len(responseFiles) == 0 {
+		recordError("no_response", "", folder.ResponsePath, fmt.Errorf("no processable response files found after wait"))
+		return result
+	}
+	result.Detail.Status = "processing_response"
+
+	for _, file := range responseFiles {
+		outcome, err := processFile(ctx, ftpClient, loader, cfg, file.Name, folder, logger)
+		if err != nil {
+			recordError(stageForFileError(err), file.Name, folder.ResponsePath, err)
+			continue
+		}
+
+		result.Detail.FilesProcessed++
+		if outcome.Recovered {
+			result.Detail.FilesRecovered++
+		}
+		for _, detail := range outcome.TransactionDetails {
+			tableName, _ := detail["table_name"].(string)
+			count, _ := detail["count"].(int)
+			result.TransactionDetails[tableName] += count
+		}
+		logger.InfoContext(ctx, "Successfully processed file",
+			"file", file.Name,
+			"source_folder", sourceFolder,
+			"transactions_loaded", outcome.LoadedTransactions,
+			"recovered", outcome.Recovered,
+			"event", "file_process_success",
+		)
+	}
+
+	if len(result.ErrorBreakdown) == 0 {
+		result.Detail.Status = "loaded"
+	} else if result.Detail.FilesProcessed > 0 {
+		result.Detail.Status = "partial"
+	}
+
+	return result
+}
+
+func cleanupFolderPath(ctx context.Context, ftpClient ftp.FTPClient, path, sourceFolder, folderKind string, logger *slog.Logger) (int, error) {
+	files, err := ftpClient.ListFiles(path)
+	if err != nil {
+		logger.ErrorContext(ctx, "Failed to list folder before cleanup",
+			"source_folder", sourceFolder,
+			"path", path,
+			"folder_kind", folderKind,
+			"error", err.Error(),
+			"event", "folder_cleanup_list_error",
+		)
+		return 0, err
+	}
+	if err := ftpClient.ClearDirectory(path); err != nil {
+		logger.ErrorContext(ctx, "Failed to clear folder",
+			"source_folder", sourceFolder,
+			"path", path,
+			"folder_kind", folderKind,
+			"error", err.Error(),
+			"event", "folder_cleanup_error",
+		)
+		return 0, err
+	}
+	logger.InfoContext(ctx, "Folder cleanup complete",
+		"source_folder", sourceFolder,
+		"path", path,
+		"folder_kind", folderKind,
+		"deleted_files", len(files),
+		"event", "folder_cleanup_complete",
+	)
+	return len(files), nil
+}
+
+func listProcessableResponseFiles(ftpClient ftp.FTPClient, responsePath string) ([]*ftplib.Entry, []*ftplib.Entry, int, error) {
+	allFiles, err := ftpClient.ListFiles(responsePath)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	responseFiles := ftp.FilterUnprocessedFiles(allFiles)
+	responseFiles = ftp.FilterFilesByName(responseFiles, "SaveResult001.txt")
+	return allFiles, responseFiles, len(allFiles) - len(responseFiles), nil
 }
 
 // processFile обрабатывает один файл из FTP
@@ -646,6 +623,14 @@ func processFile(ctx context.Context, ftpClient ftp.FTPClient, loader fileLoader
 			)
 		}
 	}()
+
+	fileInfo, err := os.Stat(localPath)
+	if err != nil {
+		return outcome, newStagedFileError("file_stat_error", fmt.Errorf("failed to stat local file: %w", err))
+	}
+	if fileInfo.Size() == 0 {
+		return outcome, newStagedFileError("empty_response", errors.New("response file is empty"))
+	}
 
 	sourceFolder := folder.KassaCode + "/" + folder.FolderName
 	contentHash, err := hashLocalFile(localPath)

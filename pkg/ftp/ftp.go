@@ -397,6 +397,10 @@ func (c *Client) ClearDirectory(path string) error {
 	// Delete all files (not directories)
 	for _, entry := range entries {
 		if entry.Type == ftp.EntryTypeFile {
+			modifiedAt := ""
+			if !entry.Time.IsZero() {
+				modifiedAt = entry.Time.UTC().Format(time.RFC3339)
+			}
 			// Use relative path since we're in the directory
 			filePath := entry.Name
 			if err := c.conn.Delete(filePath); err != nil {
@@ -405,18 +409,24 @@ func (c *Client) ClearDirectory(path string) error {
 				if err := c.conn.Delete(fullPath); err != nil {
 					slog.Warn("Failed to delete file",
 						"file", fullPath,
+						"size", entry.Size,
+						"modified_at", modifiedAt,
 						"error", err.Error(),
 						"event", "ftp_delete_warning",
 					)
 				} else {
 					slog.Debug("Deleted file",
 						"file", fullPath,
+						"size", entry.Size,
+						"modified_at", modifiedAt,
 						"event", "ftp_file_deleted",
 					)
 				}
 			} else {
 				slog.Debug("Deleted file",
 					"file", path+"/"+entry.Name,
+					"size", entry.Size,
+					"modified_at", modifiedAt,
 					"event", "ftp_file_deleted",
 				)
 			}

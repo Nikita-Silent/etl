@@ -53,17 +53,12 @@ func (m *mockFileLoader) GetTransactionDetails(transactions map[string]interface
 }
 
 func TestRunWithClientsMarksPartialStatusOnOperationalIssues(t *testing.T) {
-	oldWait := waitForResponsesFunc
 	oldProcess := processFilesFromFTPFunc
 	defer func() {
-		waitForResponsesFunc = oldWait
 		processFilesFromFTPFunc = oldProcess
 	}()
 
-	waitForResponsesFunc = func(ctx context.Context, delay time.Duration) error {
-		return nil
-	}
-	processFilesFromFTPFunc = func(ctx context.Context, ftpClient ftpclient.FTPClient, loader fileLoader, cfg *models.Config, logger *slog.Logger) (*ProcessingStats, error) {
+	processFilesFromFTPFunc = func(ctx context.Context, ftpClient ftpclient.FTPClient, loader fileLoader, cfg *models.Config, date string, logger *slog.Logger) (*ProcessingStats, error) {
 		return &ProcessingStats{
 			FilesProcessed:     1,
 			TransactionsLoaded: 12,
@@ -82,11 +77,7 @@ func TestRunWithClientsMarksPartialStatusOnOperationalIssues(t *testing.T) {
 		}, nil
 	}
 
-	ftpMock := &ftpclient.MockClient{
-		ClearAllKassaRequestFoldersFunc:         func() error { return errors.New("clear requests failed") },
-		SendRequestsToAllKassasWithDateFunc:     func(date string) error { return nil },
-		ClearAllKassaResponseProcessedFilesFunc: func() error { return nil },
-	}
+	ftpMock := &ftpclient.MockClient{}
 
 	result, err := runWithClients(
 		context.Background(),
@@ -106,11 +97,8 @@ func TestRunWithClientsMarksPartialStatusOnOperationalIssues(t *testing.T) {
 	if result.Success {
 		t.Fatal("runWithClients() success = true, want false for partial result")
 	}
-	if result.Errors != 2 {
-		t.Fatalf("runWithClients() errors = %d, want %d", result.Errors, 2)
-	}
-	if result.ErrorBreakdown["clear_request_folders"] != 1 {
-		t.Fatalf("runWithClients() missing clear_request_folders breakdown: %+v", result.ErrorBreakdown)
+	if result.Errors != 1 {
+		t.Fatalf("runWithClients() errors = %d, want %d", result.Errors, 1)
 	}
 	if result.ErrorBreakdown["file_process_error"] != 1 {
 		t.Fatalf("runWithClients() missing file_process_error breakdown: %+v", result.ErrorBreakdown)
