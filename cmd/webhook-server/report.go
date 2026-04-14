@@ -12,6 +12,13 @@ import (
 	"github.com/user/go-frontol-loader/pkg/pipeline"
 )
 
+var (
+	runPipelineFunc            = pipeline.Run
+	webhookTimeoutDurationFunc = func(minutes int) time.Duration {
+		return time.Duration(minutes) * time.Minute
+	}
+)
+
 // TransactionTypeStats представляет статистику по типу транзакций.
 type TransactionTypeStats struct {
 	TableName string `json:"table_name"`
@@ -66,7 +73,7 @@ func (s *Server) runETLPipeline(requestID, date string, log *logger.Logger) {
 			pipelineDone <- true
 		}()
 
-		result, err := pipeline.Run(ctx, log.Logger, s.config, date)
+		result, err := runPipelineFunc(ctx, log.Logger, s.config, date)
 
 		reportMutex.Lock()
 		if err != nil {
@@ -177,7 +184,7 @@ func (s *Server) runETLPipeline(requestID, date string, log *logger.Logger) {
 			)
 		}
 	} else {
-		timeout := time.Duration(s.config.WebhookTimeoutMinutes) * time.Minute
+		timeout := webhookTimeoutDurationFunc(s.config.WebhookTimeoutMinutes)
 		timeoutChan := time.After(timeout)
 
 		select {
@@ -231,6 +238,24 @@ func (s *Server) runETLPipeline(requestID, date string, log *logger.Logger) {
 			}
 			reportMutex.Unlock()
 			sendReport(timeoutReport)
+
+			log.InfoContext(ctx, "Timeout report sent, waiting for actual pipeline completion before releasing queue",
+				"log_kind", "loki_operational",
+				"request_id", requestID,
+				"date", date,
+				"event", "waiting_pipeline_after_timeout_report",
+			)
+			<-pipelineDone
+			select {
+			case <-reportReady:
+			case <-time.After(s.config.EffectiveWebhookReportResultWaitTimeout()):
+				log.WarnContext(ctx, "Timeout waiting for final report after pipeline completion",
+					"log_kind", "loki_operational",
+					"request_id", requestID,
+					"date", date,
+					"event", "report_timeout_after_pipeline_completion",
+				)
+			}
 		}
 	}
 

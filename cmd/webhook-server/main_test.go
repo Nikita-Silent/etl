@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/user/go-frontol-loader/pkg/auth"
 	"github.com/user/go-frontol-loader/pkg/models"
+	"github.com/user/go-frontol-loader/pkg/pipeline"
 )
 
 func newTestServer(t *testing.T, token string) *Server {
@@ -391,6 +394,56 @@ func TestStopDrainsLoadQueue(t *testing.T) {
 
 	if got := s.queueManager.GetQueueSize(OperationTypeLoad); got != 0 {
 		t.Fatalf("expected load queue to drain, got %d items", got)
+	}
+}
+
+func TestRunETLPipelineTimeoutDoesNotReleaseQueueEarly(t *testing.T) {
+	s := newTestServer(t, "")
+	s.config.WebhookTimeoutMinutes = 1
+	s.config.WebhookReportResultWaitTimeout = 20 * time.Millisecond
+
+	oldRunPipeline := runPipelineFunc
+	oldTimeoutDuration := webhookTimeoutDurationFunc
+	defer func() {
+		runPipelineFunc = oldRunPipeline
+		webhookTimeoutDurationFunc = oldTimeoutDuration
+	}()
+
+	pipelineStarted := make(chan struct{}, 1)
+	allowFinish := make(chan struct{})
+	runPipelineFunc = func(ctx context.Context, logger *slog.Logger, cfg *models.Config, date string) (*pipeline.PipelineResult, error) {
+		pipelineStarted <- struct{}{}
+		<-allowFinish
+		return &pipeline.PipelineResult{Status: pipeline.PipelineStatusCompleted, Success: true}, nil
+	}
+	webhookTimeoutDurationFunc = func(minutes int) time.Duration {
+		return 10 * time.Millisecond
+	}
+
+	done := make(chan struct{})
+	go func() {
+		s.runETLPipeline("req-timeout", "2026-03-23", s.logger)
+		close(done)
+	}()
+
+	select {
+	case <-pipelineStarted:
+	case <-time.After(time.Second):
+		t.Fatal("pipeline did not start")
+	}
+
+	time.Sleep(40 * time.Millisecond)
+	select {
+	case <-done:
+		t.Fatal("runETLPipeline returned before pipeline completion")
+	default:
+	}
+
+	close(allowFinish)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("runETLPipeline did not return after pipeline completion")
 	}
 }
 
