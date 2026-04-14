@@ -93,6 +93,19 @@ func TestLogger_WithRequestID(t *testing.T) {
 	}
 }
 
+func TestLogger_WithOperationID(t *testing.T) {
+	buf := &bytes.Buffer{}
+	log := New(Config{Output: buf, Format: "json"})
+
+	logWithID := log.WithOperationID("op_123")
+	logWithID.Info("test message")
+
+	payload := parseJSONLine(t, buf)
+	if got := payload["operation_id"]; got != "op_123" {
+		t.Errorf("Expected operation_id 'op_123', got: %v", got)
+	}
+}
+
 func TestLogger_WithComponent(t *testing.T) {
 	buf := &bytes.Buffer{}
 	log := New(Config{Output: buf, Format: "json"})

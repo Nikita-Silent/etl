@@ -375,6 +375,7 @@ log.Error("ETL failed",
 
 ```json
 {
+  "operation_id": "op_123",
   "request_id": "req_123",
   "date": "2024-12-18",
   "status": "error",

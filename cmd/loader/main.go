@@ -8,8 +8,16 @@ import (
 
 	"github.com/user/go-frontol-loader/pkg/config"
 	"github.com/user/go-frontol-loader/pkg/logger"
+	"github.com/user/go-frontol-loader/pkg/operations"
 	"github.com/user/go-frontol-loader/pkg/pipeline"
 )
+
+func firstIssueStage(result *pipeline.PipelineResult) string {
+	if result == nil || len(result.ErrorSamples) == 0 {
+		return ""
+	}
+	return result.ErrorSamples[0].Stage
+}
 
 func main() {
 	defaultLogger := logger.New(logger.Config{
@@ -18,6 +26,7 @@ func main() {
 		Output:  os.Stdout,
 		Backend: os.Getenv("LOG_BACKEND"),
 	})
+	defer func() { _ = defaultLogger.Close() }()
 	slog.SetDefault(defaultLogger.Logger)
 
 	// Parse command line arguments
@@ -54,7 +63,11 @@ func main() {
 		Output:  os.Stdout,
 		Backend: cfg.LogBackend,
 	})
-	log := loggerInstance.WithComponent("loader")
+	defer func() { _ = loggerInstance.Close() }()
+	operationID := logger.NewOperationID()
+	log := loggerInstance.WithComponent("loader").WithOperationID(operationID)
+	opStore := operations.NewStore(cfg, loggerInstance)
+	defer opStore.Close()
 
 	// Create context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.EffectiveCLIRunTimeout())
@@ -68,6 +81,15 @@ func main() {
 		"pipeline_load_timeout", cfg.EffectivePipelineLoadTimeout(),
 		"wait_delay", cfg.WaitDelayMinutes,
 	)
+	_ = opStore.Start(ctx, operations.Record{
+		OperationID:   operationID,
+		OperationType: "cli_load",
+		Status:        operations.StatusProcessing,
+		Date:          date,
+		Component:     "loader",
+		StartedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+	})
 
 	// Run ETL pipeline
 	log.InfoContext(ctx, "Starting ETL pipeline",
@@ -76,6 +98,18 @@ func main() {
 	)
 	result, err := pipeline.Run(ctx, log.Logger, cfg, date)
 	if err != nil {
+		now := time.Now()
+		_ = opStore.Update(ctx, operations.Record{
+			OperationID:   operationID,
+			OperationType: "cli_load",
+			Status:        operations.StatusFailed,
+			Date:          date,
+			Component:     "loader",
+			UpdatedAt:     now,
+			FinishedAt:    &now,
+			ErrorMessage:  err.Error(),
+			FailedStage:   "pipeline",
+		})
 		log.ErrorContext(ctx, "ETL pipeline failed",
 			"error", err.Error(),
 			"event", "etl_failed",
@@ -83,6 +117,22 @@ func main() {
 		cancel()
 		os.Exit(1)
 	}
+	now := time.Now()
+	status := operations.StatusCompleted
+	if result.Status == pipeline.PipelineStatusPartial {
+		status = operations.StatusPartial
+	}
+	_ = opStore.Update(ctx, operations.Record{
+		OperationID:   operationID,
+		OperationType: "cli_load",
+		Status:        status,
+		Date:          date,
+		Component:     "loader",
+		UpdatedAt:     now,
+		FinishedAt:    &now,
+		ErrorMessage:  result.ErrorMessage,
+		FailedStage:   firstIssueStage(result),
+	})
 
 	// Print results
 	log.InfoContext(ctx, "ETL pipeline completed successfully",

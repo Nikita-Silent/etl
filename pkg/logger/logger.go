@@ -3,9 +3,11 @@ package logger
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,6 +29,7 @@ type Logger struct {
 	*slog.Logger
 	zlogger zerolog.Logger
 	backend string
+	closer  io.Closer
 }
 
 // Config holds logger configuration
@@ -36,9 +39,17 @@ type Config struct {
 	Output  io.Writer
 	Backend string // zerolog (default) or slog
 	// Filtering (allow only selected values of a structured field).
-	FilterField string   // e.g. event or component
-	FilterAllow []string // e.g. queue_item_processing_start,queue_item_processing_completed
-	TimeFormat  string   // override zerolog time format, defaults to RFC3339Nano
+	FilterField     string   // e.g. event or component
+	FilterAllow     []string // e.g. queue_item_processing_start,queue_item_processing_completed
+	TimeFormat      string   // override zerolog time format, defaults to RFC3339Nano
+	Sink            string   // stdout (default), loki, both
+	LokiURL         string
+	LokiTenantID    string
+	LokiBearerToken string
+	LokiBatchWait   time.Duration
+	LokiBatchSize   int
+	LokiTimeout     time.Duration
+	LokiLabels      map[string]string
 }
 
 // New creates a new Logger with the given configuration
@@ -53,11 +64,24 @@ func New(cfg Config) *Logger {
 	}
 
 	applyFilterEnv(&cfg)
+	applyLokiEnv(&cfg)
 	timeFormat := cfg.TimeFormat
 	if timeFormat == "" {
 		timeFormat = time.RFC3339Nano
 	}
 	zerolog.TimeFieldFormat = timeFormat
+
+	writer := cfg.Output
+	var closer io.Closer
+	if !isTextFormat(cfg.Format) {
+		var sinkErr error
+		writer, closer, sinkErr = buildSinkWriter(cfg)
+		if sinkErr != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "logger sink disabled: %v\n", sinkErr)
+			writer = cfg.Output
+			closer = nil
+		}
+	}
 
 	if backend == "slog" {
 		level := parseSlogLevel(cfg.Level)
@@ -78,19 +102,18 @@ func New(cfg Config) *Logger {
 		if isTextFormat(cfg.Format) {
 			handler = slog.NewTextHandler(cfg.Output, opts)
 		} else {
-			handler = slog.NewJSONHandler(cfg.Output, opts)
+			handler = slog.NewJSONHandler(writer, opts)
 		}
 
-		return newSlogLogger(slog.New(handler))
+		return newSlogLogger(slog.New(handler), closer)
 	}
 
-	writer := cfg.Output
 	allowlist := normalizeAllowlist(cfg.FilterAllow)
 	if cfg.FilterField != "" && len(allowlist) > 0 {
 		writer = &filteringWriter{
 			field: cfg.FilterField,
 			allow: allowlist,
-			out:   cfg.Output,
+			out:   writer,
 		}
 	}
 
@@ -112,7 +135,7 @@ func New(cfg Config) *Logger {
 			Logger()
 	}
 
-	return newLogger(logger)
+	return newLogger(logger, closer)
 }
 
 // Default creates a logger with default settings
@@ -153,6 +176,11 @@ func parseSlogLevel(level string) slog.Level {
 	}
 }
 
+// NewOperationID creates a stable operation correlation identifier.
+func NewOperationID() string {
+	return fmt.Sprintf("op_%d", time.Now().UnixNano())
+}
+
 // WithRequestID returns a logger with request ID context
 func (l *Logger) WithRequestID(requestID string) *Logger {
 	if l.backend == "slog" {
@@ -160,9 +188,23 @@ func (l *Logger) WithRequestID(requestID string) *Logger {
 			Logger:  l.With("request_id", requestID),
 			zlogger: l.zlogger,
 			backend: l.backend,
+			closer:  l.closer,
 		}
 	}
-	return newLogger(l.zlogger.With().Str("request_id", requestID).Logger())
+	return newLogger(l.zlogger.With().Str("request_id", requestID).Logger(), l.closer)
+}
+
+// WithOperationID returns a logger with operation ID context.
+func (l *Logger) WithOperationID(operationID string) *Logger {
+	if l.backend == "slog" {
+		return &Logger{
+			Logger:  l.With("operation_id", operationID),
+			zlogger: l.zlogger,
+			backend: l.backend,
+			closer:  l.closer,
+		}
+	}
+	return newLogger(l.zlogger.With().Str("operation_id", operationID).Logger(), l.closer)
 }
 
 // WithComponent returns a logger with component context
@@ -172,9 +214,10 @@ func (l *Logger) WithComponent(component string) *Logger {
 			Logger:  l.With("component", component),
 			zlogger: l.zlogger,
 			backend: l.backend,
+			closer:  l.closer,
 		}
 	}
-	return newLogger(l.zlogger.With().Str("component", component).Logger())
+	return newLogger(l.zlogger.With().Str("component", component).Logger(), l.closer)
 }
 
 // WithKassa returns a logger with kassa context
@@ -184,12 +227,21 @@ func (l *Logger) WithKassa(kassaCode, folderName string) *Logger {
 			Logger:  l.With("kassa_code", kassaCode, "folder", folderName),
 			zlogger: l.zlogger,
 			backend: l.backend,
+			closer:  l.closer,
 		}
 	}
 	return newLogger(l.zlogger.With().
 		Str("kassa_code", kassaCode).
 		Str("folder", folderName).
-		Logger())
+		Logger(), l.closer)
+}
+
+// Close flushes attached log sinks when supported.
+func (l *Logger) Close() error {
+	if l == nil || l.closer == nil {
+		return nil
+	}
+	return l.closer.Close()
 }
 
 // ETL logging helpers
@@ -281,7 +333,7 @@ func (l *Logger) Zerolog() zerolog.Logger {
 	return l.zlogger
 }
 
-func newLogger(zlogger zerolog.Logger) *Logger {
+func newLogger(zlogger zerolog.Logger, closer io.Closer) *Logger {
 	handler := &zerologHandler{
 		logger: zlogger,
 	}
@@ -290,14 +342,16 @@ func newLogger(zlogger zerolog.Logger) *Logger {
 		Logger:  slog.New(handler),
 		zlogger: zlogger,
 		backend: "zerolog",
+		closer:  closer,
 	}
 }
 
-func newSlogLogger(slogger *slog.Logger) *Logger {
+func newSlogLogger(slogger *slog.Logger, closer io.Closer) *Logger {
 	return &Logger{
 		Logger:  slogger,
 		zlogger: zerolog.Nop(),
 		backend: "slog",
+		closer:  closer,
 	}
 }
 
@@ -516,4 +570,85 @@ func applyFilterEnv(cfg *Config) {
 			cfg.FilterAllow = strings.Split(raw, ",")
 		}
 	}
+}
+
+func applyLokiEnv(cfg *Config) {
+	if cfg.Sink == "" {
+		cfg.Sink = strings.TrimSpace(os.Getenv("LOG_SINK"))
+	}
+	if cfg.Sink == "" {
+		cfg.Sink = "stdout"
+	}
+	if cfg.LokiURL == "" {
+		cfg.LokiURL = strings.TrimSpace(os.Getenv("LOKI_URL"))
+	}
+	if cfg.LokiTenantID == "" {
+		cfg.LokiTenantID = strings.TrimSpace(os.Getenv("LOKI_TENANT_ID"))
+	}
+	if cfg.LokiBearerToken == "" {
+		cfg.LokiBearerToken = strings.TrimSpace(os.Getenv("LOKI_BEARER_TOKEN"))
+	}
+	if cfg.LokiBatchWait <= 0 {
+		if raw := strings.TrimSpace(os.Getenv("LOKI_BATCH_WAIT_MS")); raw != "" {
+			if ms, err := strconv.Atoi(raw); err == nil && ms > 0 {
+				cfg.LokiBatchWait = time.Duration(ms) * time.Millisecond
+			}
+		}
+	}
+	if cfg.LokiBatchSize <= 0 {
+		if raw := strings.TrimSpace(os.Getenv("LOKI_BATCH_SIZE")); raw != "" {
+			if parsed, err := strconv.Atoi(raw); err == nil {
+				cfg.LokiBatchSize = parsed
+			}
+		}
+	}
+	if cfg.LokiTimeout <= 0 {
+		if raw := strings.TrimSpace(os.Getenv("LOKI_TIMEOUT_SECONDS")); raw != "" {
+			if seconds, err := strconv.Atoi(raw); err == nil && seconds > 0 {
+				cfg.LokiTimeout = time.Duration(seconds) * time.Second
+			}
+		}
+	}
+	if len(cfg.LokiLabels) == 0 {
+		cfg.LokiLabels = parseLabelsEnv(os.Getenv("LOKI_LABELS"))
+	}
+}
+
+func buildSinkWriter(cfg Config) (io.Writer, io.Closer, error) {
+	switch strings.ToLower(strings.TrimSpace(cfg.Sink)) {
+	case "", "stdout":
+		return cfg.Output, nil, nil
+	case "loki":
+		writer, err := newLokiWriter(cfg)
+		return writer, writer, err
+	case "both":
+		writer, err := newLokiWriter(cfg)
+		if err != nil {
+			return nil, nil, err
+		}
+		return io.MultiWriter(cfg.Output, writer), writer, nil
+	default:
+		return nil, nil, fmt.Errorf("unsupported LOG_SINK %q", cfg.Sink)
+	}
+}
+
+func parseLabelsEnv(raw string) map[string]string {
+	labels := make(map[string]string)
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		key, value, ok := strings.Cut(part, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key == "" || value == "" {
+			continue
+		}
+		labels[key] = value
+	}
+	return labels
 }

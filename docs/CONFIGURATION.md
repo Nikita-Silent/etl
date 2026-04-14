@@ -111,10 +111,19 @@ KASSA_STRUCTURE=P13:P13;N22:N22_Inter,N22_FURN;SH54:SH54
 | `WAIT_DELAY_MINUTES` | ❌ Нет | `1` | Задержка ожидания Frontol (мин) |
 | `PIPELINE_LOAD_TIMEOUT_MINUTES` | ❌ Нет | `60` | Таймаут DB load/reconcile стадии одного файла |
 | `CLI_RUN_TIMEOUT_MINUTES` | ❌ Нет | `30` | Внешний таймаут CLI entrypoints (`cmd/loader`, `cmd/loader-local`) |
+| `OPERATION_STALE_TIMEOUT_MINUTES` | ❌ Нет | `120` | Через сколько незавершенная ETL-операция считается stale и помечается abandoned при следующем запуске |
 | `WORKER_POOL_SIZE` | ❌ Нет | `10` | Размер worker pool для обработки файлов |
 | `LOG_LEVEL` | ❌ Нет | `info` | Уровень логирования |
 | `LOG_FORMAT` | ❌ Нет | `json` | Формат логов (`json`, `text`, `console`) |
 | `LOG_BACKEND` | ❌ Нет | `zerolog` | Бэкенд логирования (`zerolog`, `slog`) |
+| `LOG_SINK` | ❌ Нет | `stdout` | Куда писать логи (`stdout`, `loki`, `both`) |
+| `LOKI_URL` | ❌ Нет | - | HTTP endpoint Loki push API (`/loki/api/v1/push`) |
+| `LOKI_TENANT_ID` | ❌ Нет | - | Значение заголовка `X-Scope-OrgID` для multi-tenant Loki |
+| `LOKI_BEARER_TOKEN` | ❌ Нет | - | Bearer token для прямой отправки логов в Loki |
+| `LOKI_BATCH_WAIT_MS` | ❌ Нет | `1000` | Максимальное время накопления log batch перед отправкой |
+| `LOKI_BATCH_SIZE` | ❌ Нет | `100` | Максимум log entries в одном push batch |
+| `LOKI_TIMEOUT_SECONDS` | ❌ Нет | `5` | HTTP timeout отправки batch в Loki |
+| `LOKI_LABELS` | ❌ Нет | `service=frontol-etl` | Статические labels в формате `key=value,key2=value2` |
 
 **Допустимые значения `LOG_LEVEL`:**
 - `debug` - Детальная информация для отладки
@@ -176,6 +185,7 @@ SHUTDOWN_TIMEOUT_SECONDS=30
 - `WAIT_DELAY_MINUTES` - бизнес-ожидание Frontol перед чтением `response` файлов.
 - `PIPELINE_LOAD_TIMEOUT_MINUTES` - лимит на стадию `load/reconcile` одного файла.
 - `CLI_RUN_TIMEOUT_MINUTES` - внешний timeout CLI запусков ETL.
+- `OPERATION_STALE_TIMEOUT_MINUTES` - TTL для operation-level lifecycle registry; после рестарта старые `started/queued/processing/timeout_reported` операции будут помечены как `abandoned`.
 - `WEBHOOK_TIMEOUT_MINUTES` - timeout SLA webhook-отчета как бизнес-события, не HTTP клиента.
 - `WEBHOOK_REPORT_HTTP_TIMEOUT_SECONDS` - timeout исходящего HTTP запроса на `WEBHOOK_REPORT_URL`.
 - `WEBHOOK_REPORT_RESULT_WAIT_SECONDS` - сколько ждать сформированный итог после завершения pipeline before logging timeout warning.
@@ -185,6 +195,9 @@ SHUTDOWN_TIMEOUT_SECONDS=30
 ## Loki/Grafana Logging
 
 После reliability/logging refactor приложение пишет Loki-friendly structured events в JSON при `LOG_FORMAT=json`.
+
+Прямая отправка в Loki включается через `LOG_SINK=loki` или `LOG_SINK=both`.
+Без этой настройки поведение остается прежним: логи идут только в `stdout`.
 
 Ключевые типы событий:
 
@@ -201,6 +214,7 @@ SHUTDOWN_TIMEOUT_SECONDS=30
 - `event`
 - `log_kind`
 - `component`
+- `operation_id`
 - `request_id`
 - `endpoint`
 - `operation`
@@ -209,6 +223,8 @@ SHUTDOWN_TIMEOUT_SECONDS=30
 - `date`
 - `source_folder`
 - `client_ip`
+
+`request_id` описывает HTTP request scope, а `operation_id` сопровождает бизнес-операцию от приема запроса до завершения загрузки или выгрузки.
 
 ---
 

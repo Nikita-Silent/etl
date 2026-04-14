@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/user/go-frontol-loader/pkg/models"
 	"golang.org/x/text/encoding/charmap"
@@ -145,6 +146,11 @@ func (p *Pool) Query(ctx context.Context, sql string, args ...interface{}) (pgx.
 // QueryRow executes a query and returns a single row
 func (p *Pool) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
 	return p.Pool.QueryRow(ctx, sql, args...)
+}
+
+// Exec executes a query without returning rows.
+func (p *Pool) Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error) {
+	return p.Pool.Exec(ctx, sql, args...)
 }
 
 // convertRowValues converts all string values in a row from Windows-1251 to UTF-8

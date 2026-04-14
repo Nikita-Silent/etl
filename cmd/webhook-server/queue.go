@@ -13,6 +13,7 @@ import (
 
 	"github.com/user/go-frontol-loader/pkg/logger"
 	"github.com/user/go-frontol-loader/pkg/models"
+	"github.com/user/go-frontol-loader/pkg/operations"
 )
 
 // OperationType представляет тип операции.
@@ -26,6 +27,7 @@ const (
 // QueueItem представляет элемент очереди запросов.
 type QueueItem struct {
 	RequestID     string
+	OperationID   string
 	Date          string
 	OperationType OperationType
 	SourceFolder  string
@@ -95,6 +97,7 @@ type Server struct {
 	workerWg     sync.WaitGroup
 	httpServer   *http.Server
 	stopping     atomic.Bool
+	opStore      *operations.Store
 }
 
 func NewRequestQueueManager(queueSize int) *RequestQueueManager {
@@ -147,8 +150,9 @@ func (rqm *RequestQueueManager) StartWorkerForOperation(operationType OperationT
 		)
 
 		for item := range queue.queue {
-			server.logger.Info("Taking next request from operation queue",
+			item.Logger.Info("Taking next request from operation queue",
 				"request_id", item.RequestID,
+				"operation_id", item.OperationID,
 				"operation_type", operationType,
 				"date", item.Date,
 				"queue_size", queue.Size(),
@@ -224,6 +228,7 @@ func NewServer(cfg *models.Config) *Server {
 		config:       cfg,
 		logger:       loggerInstance.WithComponent("webhook-server"),
 		queueManager: NewRequestQueueManager(100),
+		opStore:      operations.NewStore(cfg, loggerInstance),
 	}
 }
 
@@ -234,6 +239,7 @@ func (s *Server) processQueueItem(item *QueueItem) {
 
 	log.InfoContext(ctx, "=== STARTING REQUEST PROCESSING ===",
 		"request_id", item.RequestID,
+		"operation_id", item.OperationID,
 		"operation_type", item.OperationType,
 		"date", item.Date,
 		"queue_wait_time", time.Since(item.CreatedAt).String(),
@@ -241,11 +247,35 @@ func (s *Server) processQueueItem(item *QueueItem) {
 		"total_queue_size", s.queueManager.GetTotalSize(),
 		"event", "queue_item_processing_start",
 	)
+	s.trackOperation(ctx, operations.Record{
+		OperationID:   item.OperationID,
+		RequestID:     item.RequestID,
+		OperationType: string(item.OperationType),
+		Status:        operations.StatusProcessing,
+		Date:          item.Date,
+		SourceFolder:  item.SourceFolder,
+		Component:     "webhook-server",
+		UpdatedAt:     time.Now(),
+	})
 
 	switch item.OperationType {
 	case OperationTypeLoad:
-		s.runETLPipeline(item.RequestID, item.Date, log)
+		s.runETLPipeline(item.OperationID, item.RequestID, item.Date, log)
 	default:
+		now := time.Now()
+		s.trackOperation(ctx, operations.Record{
+			OperationID:   item.OperationID,
+			RequestID:     item.RequestID,
+			OperationType: string(item.OperationType),
+			Status:        operations.StatusFailed,
+			Date:          item.Date,
+			SourceFolder:  item.SourceFolder,
+			Component:     "webhook-server",
+			UpdatedAt:     now,
+			FinishedAt:    &now,
+			ErrorMessage:  "unknown operation type",
+			FailedStage:   "queue_dispatch",
+		})
 		log.ErrorContext(ctx, "Unknown operation type",
 			"operation_type", item.OperationType,
 			"event", "unknown_operation_type",
@@ -256,6 +286,7 @@ func (s *Server) processQueueItem(item *QueueItem) {
 
 	log.InfoContext(ctx, "=== REQUEST PROCESSING COMPLETED ===",
 		"request_id", item.RequestID,
+		"operation_id", item.OperationID,
 		"operation_type", item.OperationType,
 		"date", item.Date,
 		"processing_duration", processingDuration.String(),
@@ -266,9 +297,27 @@ func (s *Server) processQueueItem(item *QueueItem) {
 
 	log.InfoContext(ctx, "Request removed from operation queue, next request for this operation type will be processed",
 		"request_id", item.RequestID,
+		"operation_id", item.OperationID,
 		"operation_type", item.OperationType,
 		"event", "queue_item_removed",
 	)
+}
+
+func (s *Server) trackOperation(ctx context.Context, record operations.Record) {
+	if s == nil || s.opStore == nil {
+		return
+	}
+	if record.OperationID == "" {
+		return
+	}
+	if err := s.opStore.Update(ctx, record); err != nil {
+		s.logger.WarnContext(ctx, "Failed to persist operation lifecycle update",
+			"operation_id", record.OperationID,
+			"status", record.Status,
+			"error", err.Error(),
+			"event", "operation_lifecycle_persist_warning",
+		)
+	}
 }
 
 func (s *Server) Stop() {
@@ -309,6 +358,10 @@ func (s *Server) Stop() {
 
 		s.queueManager.StopAll()
 		s.workerWg.Wait()
+		if s.opStore != nil {
+			s.opStore.Close()
+		}
+		_ = s.logger.Close()
 
 		remainingQueueSize := s.queueManager.GetTotalSize()
 		if remainingQueueSize > 0 {

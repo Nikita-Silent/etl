@@ -11,6 +11,7 @@ import (
 
 	"github.com/user/go-frontol-loader/pkg/config"
 	"github.com/user/go-frontol-loader/pkg/logger"
+	"github.com/user/go-frontol-loader/pkg/operations"
 	"github.com/user/go-frontol-loader/pkg/validation"
 )
 
@@ -27,6 +28,13 @@ type WebhookResponse struct {
 	RequestID string `json:"request_id,omitempty"`
 }
 
+func requestIDFromRequest(r *http.Request) string {
+	if requestID := r.Header.Get("X-Request-ID"); requestID != "" {
+		return requestID
+	}
+	return fmt.Sprintf("req_%d", time.Now().UnixNano())
+}
+
 // webhookHandler обрабатывает POST запросы к /api/load
 func (s *Server) webhookHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -34,11 +42,11 @@ func (s *Server) webhookHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Генерируем ID запроса для отслеживания
-	requestID := fmt.Sprintf("req_%d", time.Now().UnixNano())
+	requestID := requestIDFromRequest(r)
+	operationID := logger.NewOperationID()
 	ctx := r.Context()
-	log := s.logger.WithRequestID(requestID)
-	audit := newRequestAudit(requestID, "/api/load", string(OperationTypeLoad), r)
+	log := s.logger.WithRequestID(requestID).WithOperationID(operationID)
+	audit := newRequestAudit(requestID, operationID, "/api/load", string(OperationTypeLoad), r)
 
 	logAPIRequestReceived(ctx, log, audit)
 
@@ -100,6 +108,7 @@ func (s *Server) webhookHandler(w http.ResponseWriter, r *http.Request) {
 	// Добавляем запрос в очередь для типа операции "load"
 	queueItem := &QueueItem{
 		RequestID:     requestID,
+		OperationID:   operationID,
 		Date:          date,
 		OperationType: OperationTypeLoad,
 		Logger:        log,
@@ -107,6 +116,20 @@ func (s *Server) webhookHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.enqueue(queueItem); err != nil {
+		now := time.Now()
+		s.trackOperation(ctx, operations.Record{
+			OperationID:   operationID,
+			RequestID:     requestID,
+			OperationType: string(OperationTypeLoad),
+			Status:        operations.StatusFailed,
+			Date:          date,
+			Component:     "webhook-server",
+			StartedAt:     queueItem.CreatedAt,
+			UpdatedAt:     now,
+			FinishedAt:    &now,
+			ErrorMessage:  err.Error(),
+			FailedStage:   "enqueue",
+		})
 		log.ErrorContext(ctx, "Failed to enqueue request",
 			"error", err.Error(),
 			"operation_type", OperationTypeLoad,
@@ -122,6 +145,16 @@ func (s *Server) webhookHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Service unavailable: queue is full", http.StatusServiceUnavailable)
 		return
 	}
+	s.trackOperation(ctx, operations.Record{
+		OperationID:   operationID,
+		RequestID:     requestID,
+		OperationType: string(OperationTypeLoad),
+		Status:        operations.StatusQueued,
+		Date:          date,
+		Component:     "webhook-server",
+		StartedAt:     queueItem.CreatedAt,
+		UpdatedAt:     time.Now(),
+	})
 
 	// Отвечаем клиенту немедленно
 	response := WebhookResponse{
@@ -131,6 +164,7 @@ func (s *Server) webhookHandler(w http.ResponseWriter, r *http.Request) {
 		RequestID: requestID,
 	}
 
+	w.Header().Set("X-Operation-ID", operationID)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
 	if err := json.NewEncoder(w).Encode(response); err != nil {
@@ -164,9 +198,10 @@ func (s *Server) downloadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	requestID := fmt.Sprintf("req_%d", time.Now().UnixNano())
-	log := s.logger.WithRequestID(requestID)
-	audit := newRequestAudit(requestID, "/api/files", string(OperationTypeDownload), r)
+	requestID := requestIDFromRequest(r)
+	operationID := logger.NewOperationID()
+	log := s.logger.WithRequestID(requestID).WithOperationID(operationID)
+	audit := newRequestAudit(requestID, operationID, "/api/files", string(OperationTypeDownload), r)
 	logAPIRequestReceived(ctx, log, audit)
 
 	// Получаем параметры из query string
@@ -213,8 +248,33 @@ func (s *Server) downloadHandler(w http.ResponseWriter, r *http.Request) {
 		"date", date,
 		"event", "download_request",
 	)
+	s.trackOperation(ctx, operations.Record{
+		OperationID:   operationID,
+		RequestID:     requestID,
+		OperationType: string(OperationTypeDownload),
+		Status:        operations.StatusProcessing,
+		Date:          date,
+		SourceFolder:  sourceFolder,
+		Component:     "webhook-server",
+		StartedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+	})
 
 	if s.stopping.Load() {
+		now := time.Now()
+		s.trackOperation(ctx, operations.Record{
+			OperationID:   operationID,
+			RequestID:     requestID,
+			OperationType: string(OperationTypeDownload),
+			Status:        operations.StatusFailed,
+			Date:          date,
+			SourceFolder:  sourceFolder,
+			Component:     "webhook-server",
+			UpdatedAt:     now,
+			FinishedAt:    &now,
+			ErrorMessage:  "server is shutting down",
+			FailedStage:   "download_shutdown_guard",
+		})
 		log.WarnContext(ctx, "Rejecting download request during shutdown",
 			"source_folder", sourceFolder,
 			"date", date,
@@ -230,11 +290,35 @@ func (s *Server) downloadHandler(w http.ResponseWriter, r *http.Request) {
 
 	log.InfoContext(ctx, "Starting synchronous download request",
 		"log_kind", "loki_operational",
+		"operation_id", operationID,
 		"date", date,
 		"source_folder", sourceFolder,
 		"event", "download_request_processing",
 	)
+	w.Header().Set("X-Operation-ID", operationID)
 	result := s.processDownloadRequest(ctx, log, w, sourceFolder, date)
+	now := time.Now()
+	status := operations.StatusCompleted
+	failedStage := ""
+	errMsg := ""
+	if result.StatusCode >= 400 {
+		status = operations.StatusFailed
+		failedStage = "download"
+		errMsg = result.Outcome
+	}
+	s.trackOperation(ctx, operations.Record{
+		OperationID:   operationID,
+		RequestID:     requestID,
+		OperationType: string(OperationTypeDownload),
+		Status:        status,
+		Date:          date,
+		SourceFolder:  sourceFolder,
+		Component:     "webhook-server",
+		UpdatedAt:     now,
+		FinishedAt:    &now,
+		ErrorMessage:  errMsg,
+		FailedStage:   failedStage,
+	})
 	if result.StatusCode >= 400 {
 		logAPIRequestRejected(ctx, log, audit, result.StatusCode, result.Outcome,
 			"source_folder", sourceFolder,
@@ -262,6 +346,7 @@ func main() {
 		Output:  os.Stdout,
 		Backend: os.Getenv("LOG_BACKEND"),
 	})
+	defer func() { _ = defaultLogger.Close() }()
 	slog.SetDefault(defaultLogger.Logger)
 
 	// Загружаем конфигурацию

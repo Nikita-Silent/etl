@@ -11,24 +11,26 @@ import (
 )
 
 type requestAudit struct {
-	RequestID string
-	Endpoint  string
-	Method    string
-	Operation string
-	ClientIP  string
-	UserAgent string
-	StartedAt time.Time
+	RequestID   string
+	OperationID string
+	Endpoint    string
+	Method      string
+	Operation   string
+	ClientIP    string
+	UserAgent   string
+	StartedAt   time.Time
 }
 
-func newRequestAudit(requestID string, endpoint string, operation string, r *http.Request) requestAudit {
+func newRequestAudit(requestID string, operationID string, endpoint string, operation string, r *http.Request) requestAudit {
 	return requestAudit{
-		RequestID: requestID,
-		Endpoint:  endpoint,
-		Method:    r.Method,
-		Operation: operation,
-		ClientIP:  requestClientIP(r),
-		UserAgent: truncateForLog(r.UserAgent(), 120),
-		StartedAt: time.Now(),
+		RequestID:   requestID,
+		OperationID: operationID,
+		Endpoint:    endpoint,
+		Method:      r.Method,
+		Operation:   operation,
+		ClientIP:    requestClientIP(r),
+		UserAgent:   truncateForLog(r.UserAgent(), 120),
+		StartedAt:   time.Now(),
 	}
 }
 
@@ -36,6 +38,7 @@ func (a requestAudit) baseFields() []any {
 	return []any{
 		"log_kind", "loki_audit",
 		"request_id", a.RequestID,
+		"operation_id", a.OperationID,
 		"endpoint", a.Endpoint,
 		"method", a.Method,
 		"operation", a.Operation,

@@ -64,10 +64,25 @@ func (s *Server) Run() error {
 		"http_write_timeout", s.config.EffectiveHTTPWriteTimeout(),
 		"http_idle_timeout", s.config.EffectiveHTTPIdleTimeout(),
 		"pipeline_load_timeout", s.config.EffectivePipelineLoadTimeout(),
+		"operation_stale_timeout", s.config.EffectiveOperationStaleTimeout(),
 		"webhook_report_http_timeout", s.config.EffectiveWebhookReportHTTPTimeout(),
 		"webhook_report_result_wait_timeout", s.config.EffectiveWebhookReportResultWaitTimeout(),
 		"shutdown_timeout", s.config.EffectiveShutdownTimeout(),
 	)
+	if s.opStore != nil {
+		abandoned, err := s.opStore.RecoverStale(context.Background())
+		if err != nil {
+			s.logger.Warn("Failed to recover stale ETL operations",
+				"error", err.Error(),
+				"event", "operation_recovery_warning",
+			)
+		} else if abandoned > 0 {
+			s.logger.Warn("Recovered stale ETL operations from previous run",
+				"abandoned_operations", abandoned,
+				"event", "operation_recovery_completed",
+			)
+		}
+	}
 	s.logger.Info("Available endpoints",
 		"endpoints", []string{
 			"POST /api/load - загрузка данных из FTP в БД",

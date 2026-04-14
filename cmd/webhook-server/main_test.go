@@ -152,6 +152,9 @@ func TestWebhookHandler_Queued(t *testing.T) {
 	if payload["request_id"] == "" {
 		t.Fatalf("expected request_id to be set")
 	}
+	if got := rec.Header().Get("X-Operation-ID"); got == "" {
+		t.Fatal("expected X-Operation-ID header to be set")
+	}
 }
 
 func TestWebhookHandler_MethodNotAllowed(t *testing.T) {
@@ -423,7 +426,7 @@ func TestRunETLPipelineTimeoutDoesNotReleaseQueueEarly(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		s.runETLPipeline("req-timeout", "2026-03-23", s.logger)
+		s.runETLPipeline("op-timeout", "req-timeout", "2026-03-23", s.logger)
 		close(done)
 	}()
 
@@ -491,7 +494,7 @@ func TestRunETLPipelineSendsFinalReportAfterTimeout(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		s.runETLPipeline("req-timeout-final", "2026-03-23", s.logger)
+		s.runETLPipeline("op-timeout-final", "req-timeout-final", "2026-03-23", s.logger)
 		close(done)
 	}()
 

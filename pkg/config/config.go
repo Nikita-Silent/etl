@@ -61,6 +61,10 @@ func LoadConfig() (*models.Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	operationStaleTimeoutMinutes, err := loader.getEnvAsIntStrict("OPERATION_STALE_TIMEOUT_MINUTES", int(models.DefaultOperationStaleTimeout/time.Minute))
+	if err != nil {
+		return nil, err
+	}
 	workerPoolSize, err := loader.getEnvAsIntStrict("WORKER_POOL_SIZE", 10)
 	if err != nil {
 		return nil, err
@@ -128,17 +132,18 @@ func LoadConfig() (*models.Config, error) {
 		KassaStructure:    kassaStructure,
 
 		// Application settings
-		LocalDir:            loader.getEnv("LOCAL_DIR", "/tmp/frontol"),
-		BatchSize:           batchSize,
-		MaxRetries:          maxRetries,
-		RetryDelay:          time.Duration(retryDelaySeconds) * time.Second,
-		WaitDelayMinutes:    time.Duration(waitDelayMinutes) * time.Minute,
-		PipelineLoadTimeout: time.Duration(pipelineLoadTimeoutMinutes) * time.Minute,
-		CLIRunTimeout:       time.Duration(cliRunTimeoutMinutes) * time.Minute,
-		WorkerPoolSize:      workerPoolSize,
-		LogLevel:            loader.getEnv("LOG_LEVEL", "info"),
-		LogFormat:           loader.getEnv("LOG_FORMAT", "json"),
-		LogBackend:          loader.getEnv("LOG_BACKEND", "zerolog"),
+		LocalDir:              loader.getEnv("LOCAL_DIR", "/tmp/frontol"),
+		BatchSize:             batchSize,
+		MaxRetries:            maxRetries,
+		RetryDelay:            time.Duration(retryDelaySeconds) * time.Second,
+		WaitDelayMinutes:      time.Duration(waitDelayMinutes) * time.Minute,
+		PipelineLoadTimeout:   time.Duration(pipelineLoadTimeoutMinutes) * time.Minute,
+		CLIRunTimeout:         time.Duration(cliRunTimeoutMinutes) * time.Minute,
+		OperationStaleTimeout: time.Duration(operationStaleTimeoutMinutes) * time.Minute,
+		WorkerPoolSize:        workerPoolSize,
+		LogLevel:              loader.getEnv("LOG_LEVEL", "info"),
+		LogFormat:             loader.getEnv("LOG_FORMAT", "json"),
+		LogBackend:            loader.getEnv("LOG_BACKEND", "zerolog"),
 
 		// Webhook server settings
 		ServerPort:                     serverPort,
@@ -239,6 +244,9 @@ func ValidateConfig(cfg *models.Config) error {
 	}
 	if cfg.CLIRunTimeout <= 0 {
 		return fmt.Errorf("CLI_RUN_TIMEOUT_MINUTES must be greater than 0, got %v", cfg.CLIRunTimeout)
+	}
+	if cfg.OperationStaleTimeout <= 0 {
+		return fmt.Errorf("OPERATION_STALE_TIMEOUT_MINUTES must be greater than 0, got %v", cfg.OperationStaleTimeout)
 	}
 	if cfg.WebhookReportHTTPTimeout <= 0 {
 		return fmt.Errorf("WEBHOOK_REPORT_HTTP_TIMEOUT_SECONDS must be greater than 0, got %v", cfg.WebhookReportHTTPTimeout)

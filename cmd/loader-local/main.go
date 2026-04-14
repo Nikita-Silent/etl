@@ -10,6 +10,7 @@ import (
 	"github.com/user/go-frontol-loader/pkg/config"
 	"github.com/user/go-frontol-loader/pkg/db"
 	"github.com/user/go-frontol-loader/pkg/logger"
+	"github.com/user/go-frontol-loader/pkg/operations"
 	"github.com/user/go-frontol-loader/pkg/parser"
 	"github.com/user/go-frontol-loader/pkg/repository"
 )
@@ -21,6 +22,7 @@ func main() {
 		Output:  os.Stdout,
 		Backend: os.Getenv("LOG_BACKEND"),
 	})
+	defer func() { _ = defaultLogger.Close() }()
 	slog.SetDefault(defaultLogger.Logger)
 
 	// Check command line arguments
@@ -41,7 +43,9 @@ func main() {
 		Output:  os.Stdout,
 		Backend: os.Getenv("LOG_BACKEND"),
 	})
-	log := loggerInstance.WithComponent("loader-local")
+	defer func() { _ = loggerInstance.Close() }()
+	operationID := logger.NewOperationID()
+	log := loggerInstance.WithComponent("loader-local").WithOperationID(operationID)
 
 	// Load configuration
 	cfg, err := config.LoadConfig()
@@ -51,6 +55,8 @@ func main() {
 		)
 		os.Exit(1)
 	}
+	opStore := operations.NewStore(cfg, loggerInstance)
+	defer opStore.Close()
 
 	// Initialize database connection
 	database, err := db.NewPool(cfg)
@@ -115,8 +121,29 @@ func main() {
 		"db_connect_timeout", cfg.EffectiveDBConnectTimeout(),
 		"pipeline_load_timeout", cfg.EffectivePipelineLoadTimeout(),
 	)
+	_ = opStore.Start(ctx, operations.Record{
+		OperationID:   operationID,
+		OperationType: "cli_local_load",
+		Status:        operations.StatusProcessing,
+		SourceFolder:  "local",
+		Component:     "loader-local",
+		StartedAt:     startTime,
+		UpdatedAt:     time.Now(),
+	})
 
 	if err := loader.LoadFileData(ctx, transactions); err != nil {
+		now := time.Now()
+		_ = opStore.Update(ctx, operations.Record{
+			OperationID:   operationID,
+			OperationType: "cli_local_load",
+			Status:        operations.StatusFailed,
+			SourceFolder:  "local",
+			Component:     "loader-local",
+			UpdatedAt:     now,
+			FinishedAt:    &now,
+			ErrorMessage:  err.Error(),
+			FailedStage:   "db_load",
+		})
 		// #nosec G706 -- DB load errors are logged for CLI troubleshooting, not forwarded to shells.
 		slog.Error("Failed to load data",
 			"error", err.Error(),
@@ -128,6 +155,16 @@ func main() {
 
 	// Print statistics
 	loader.PrintStatistics(ctx, transactions, startTime)
+	now := time.Now()
+	_ = opStore.Update(ctx, operations.Record{
+		OperationID:   operationID,
+		OperationType: "cli_local_load",
+		Status:        operations.StatusCompleted,
+		SourceFolder:  "local",
+		Component:     "loader-local",
+		UpdatedAt:     now,
+		FinishedAt:    &now,
+	})
 
 	log.Info("Successfully processed file",
 		"file", filePath,

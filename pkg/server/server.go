@@ -159,6 +159,7 @@ func RequestIDMiddleware(next http.Handler) http.Handler {
 		if requestID == "" {
 			requestID = fmt.Sprintf("req_%d", time.Now().UnixNano())
 		}
+		r.Header.Set("X-Request-ID", requestID)
 		w.Header().Set("X-Request-ID", requestID)
 		next.ServeHTTP(w, r)
 	})
@@ -181,7 +182,8 @@ func LoggingMiddleware(log *logger.Logger) func(http.Handler) http.Handler {
 				"status", wrapped.statusCode,
 				"duration", time.Since(start).String(),
 				"remote_addr", r.RemoteAddr,
-				"request_id", w.Header().Get("X-Request-ID"),
+				"request_id", r.Header.Get("X-Request-ID"),
+				"operation_id", w.Header().Get("X-Operation-ID"),
 			)
 		})
 	}
@@ -208,6 +210,7 @@ func RecoveryMiddleware(log *logger.Logger) func(http.Handler) http.Handler {
 						"error", fmt.Sprintf("%v", err),
 						"path", r.URL.Path,
 						"method", r.Method,
+						"request_id", r.Header.Get("X-Request-ID"),
 					)
 					http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 				}

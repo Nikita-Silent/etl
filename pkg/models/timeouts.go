@@ -7,6 +7,7 @@ const (
 	DefaultFTPConnectTimeout              = 5 * time.Second
 	DefaultPipelineLoadTimeout            = 60 * time.Minute
 	DefaultCLIRunTimeout                  = 30 * time.Minute
+	DefaultOperationStaleTimeout          = 2 * time.Hour
 	DefaultWebhookReportHTTPTimeout       = 30 * time.Second
 	DefaultWebhookReportResultWaitTimeout = 5 * time.Second
 	DefaultHTTPReadHeaderTimeout          = 5 * time.Second
@@ -42,6 +43,13 @@ func (c *Config) EffectiveCLIRunTimeout() time.Duration {
 		return DefaultCLIRunTimeout
 	}
 	return c.CLIRunTimeout
+}
+
+func (c *Config) EffectiveOperationStaleTimeout() time.Duration {
+	if c == nil || c.OperationStaleTimeout <= 0 {
+		return DefaultOperationStaleTimeout
+	}
+	return c.OperationStaleTimeout
 }
 
 func (c *Config) EffectiveWebhookReportHTTPTimeout() time.Duration {

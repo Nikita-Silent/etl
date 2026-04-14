@@ -28,6 +28,7 @@ func main() {
 		Output:  os.Stdout,
 		Backend: os.Getenv("LOG_BACKEND"),
 	})
+	defer func() { _ = log.Close() }()
 
 	// Create FTP driver
 	driver := &FTPDriver{

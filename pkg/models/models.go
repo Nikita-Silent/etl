@@ -27,17 +27,18 @@ type Config struct {
 	KassaStructure    map[string][]string
 
 	// Application settings
-	LocalDir            string
-	BatchSize           int
-	MaxRetries          int
-	RetryDelay          time.Duration
-	WaitDelayMinutes    time.Duration
-	PipelineLoadTimeout time.Duration
-	CLIRunTimeout       time.Duration
-	WorkerPoolSize      int // Number of concurrent file processing workers (default: 10)
-	LogLevel            string
-	LogFormat           string // json or text/console
-	LogBackend          string // slog or zerolog
+	LocalDir              string
+	BatchSize             int
+	MaxRetries            int
+	RetryDelay            time.Duration
+	WaitDelayMinutes      time.Duration
+	PipelineLoadTimeout   time.Duration
+	CLIRunTimeout         time.Duration
+	OperationStaleTimeout time.Duration
+	WorkerPoolSize        int // Number of concurrent file processing workers (default: 10)
+	LogLevel              string
+	LogFormat             string // json or text/console
+	LogBackend            string // slog or zerolog
 
 	// Webhook server settings
 	ServerPort                     int

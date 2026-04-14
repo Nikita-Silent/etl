@@ -27,7 +27,7 @@
 - Неописанные в документации поля именуются `reserved_<N>`.
 
 ## Служебные таблицы ETL
-- Помимо `tx_*` таблиц, БД содержит служебную таблицу `etl_file_load_state`.
+- Помимо `tx_*` таблиц, БД содержит служебные таблицы `etl_file_load_state` и `etl_operation_runs`.
 - Назначение `etl_file_load_state`:
   - хранить durable-состояние успешно зафиксированной загрузки логического файла;
   - предотвращать повторную загрузку одного и того же `response.txt`, если локальный lifecycle-state не сохранился после DB commit;
@@ -43,6 +43,22 @@
   - `content_hash` TEXT
   - `transaction_manifest` JSONB
   - `updated_at` TIMESTAMPTZ
+- Назначение `etl_operation_runs`:
+  - хранить operation-level lifecycle для `load`, `download` и CLI запусков;
+  - связывать все operational logs по `operation_id`;
+  - помечать stale операции как `abandoned` после рестарта процесса.
+- Основные поля таблицы:
+  - `operation_id` TEXT PRIMARY KEY
+  - `request_id` TEXT
+  - `operation_type` TEXT
+  - `status` TEXT
+  - `date` TEXT
+  - `source_folder` TEXT
+  - `started_at` / `updated_at` / `finished_at` TIMESTAMPTZ
+  - `error_message` TEXT
+  - `failed_stage` TEXT
+  - `timeout_report_sent` BOOLEAN
+  - `crash_suspected` BOOLEAN
 
 ## Принципы хранения и обработки
 - Данные группируются по типам транзакций (таблицы `tx_*`), набор колонок фиксирован.
@@ -56,6 +72,7 @@
   - Isolation: параллельные загрузки не должны нарушать корректность чтения.
   - Durability: подтвержденные записи сохраняются при сбоях.
 - Для загрузки одного логического файла durable-метаданные в `etl_file_load_state` записываются в ту же транзакцию, что и `tx_*` строки этого файла.
+- Lifecycle записи в `etl_operation_runs` пишутся best-effort и не должны блокировать сам ETL pipeline, если registry временно недоступен.
 
 ## Миграции (по коду)
 - Используется `golang-migrate` с драйвером `pgx` и источником миграций из embedded FS.

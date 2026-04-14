@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/user/go-frontol-loader/pkg/logger"
+	"github.com/user/go-frontol-loader/pkg/operations"
 	"github.com/user/go-frontol-loader/pkg/pipeline"
 )
 
@@ -47,7 +48,7 @@ type WebhookReport struct {
 }
 
 // runETLPipeline запускает ETL pipeline и отправляет отчет.
-func (s *Server) runETLPipeline(requestID, date string, log *logger.Logger) {
+func (s *Server) runETLPipeline(operationID, requestID, date string, log *logger.Logger) {
 	ctx := context.Background()
 	startTime := time.Now()
 	report := &WebhookReport{
@@ -86,6 +87,19 @@ func (s *Server) runETLPipeline(requestID, date string, log *logger.Logger) {
 				"error", err.Error(),
 				"event", "etl_pipeline_failed",
 			)
+			now := time.Now()
+			s.trackOperation(ctx, operations.Record{
+				OperationID:   operationID,
+				RequestID:     requestID,
+				OperationType: string(OperationTypeLoad),
+				Status:        operations.StatusFailed,
+				Date:          date,
+				Component:     "webhook-server",
+				UpdatedAt:     now,
+				FinishedAt:    &now,
+				ErrorMessage:  err.Error(),
+				FailedStage:   "pipeline",
+			})
 		} else {
 			report.Status = string(result.Status)
 			report.Success = result.Success
@@ -118,6 +132,23 @@ func (s *Server) runETLPipeline(requestID, date string, log *logger.Logger) {
 				"errors", result.Errors,
 				"event", "etl_pipeline_completed",
 			)
+			now := time.Now()
+			status := operations.StatusCompleted
+			if result.Status == pipeline.PipelineStatusPartial {
+				status = operations.StatusPartial
+			}
+			s.trackOperation(ctx, operations.Record{
+				OperationID:   operationID,
+				RequestID:     requestID,
+				OperationType: string(OperationTypeLoad),
+				Status:        status,
+				Date:          date,
+				Component:     "webhook-server",
+				UpdatedAt:     now,
+				FinishedAt:    &now,
+				ErrorMessage:  result.ErrorMessage,
+				FailedStage:   firstIssueStage(result),
+			})
 		}
 		reportMutex.Unlock()
 
@@ -252,6 +283,18 @@ func (s *Server) runETLPipeline(requestID, date string, log *logger.Logger) {
 				timeoutReport.ErrorMessage = "Pipeline execution timeout reached"
 			}
 			reportMutex.Unlock()
+			s.trackOperation(ctx, operations.Record{
+				OperationID:       operationID,
+				RequestID:         requestID,
+				OperationType:     string(OperationTypeLoad),
+				Status:            operations.StatusTimeoutReported,
+				Date:              date,
+				Component:         "webhook-server",
+				UpdatedAt:         time.Now(),
+				ErrorMessage:      timeoutReport.ErrorMessage,
+				FailedStage:       "webhook_timeout",
+				TimeoutReportSent: true,
+			})
 			sendReport(timeoutReport, false)
 
 			log.InfoContext(ctx, "Timeout report sent, waiting for actual pipeline completion before releasing queue",
@@ -295,6 +338,13 @@ func (s *Server) runETLPipeline(requestID, date string, log *logger.Logger) {
 		"date", date,
 		"event", "pipeline_fully_completed",
 	)
+}
+
+func firstIssueStage(result *pipeline.PipelineResult) string {
+	if result == nil || len(result.ErrorSamples) == 0 {
+		return ""
+	}
+	return result.ErrorSamples[0].Stage
 }
 
 // sendWebhookReport отправляет отчет на указанный webhook URL.
