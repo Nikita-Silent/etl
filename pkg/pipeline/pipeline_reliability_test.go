@@ -142,7 +142,7 @@ func TestProcessFilePersistsPendingFinalizationState(t *testing.T) {
 		},
 	}
 
-	_, err := processFile(context.Background(), ftpMock, loader, &models.Config{LocalDir: localDir}, "response.txt", folder, logger)
+	_, err := processFile(context.Background(), ftpMock, loader, &models.Config{LocalDir: localDir}, "response.txt", folder, "2024-12-01", logger)
 	if err == nil {
 		t.Fatal("processFile() expected error when mark processed fails")
 	}
@@ -155,7 +155,7 @@ func TestProcessFilePersistsPendingFinalizationState(t *testing.T) {
 		t.Fatalf("hashLocalFile() unexpected error: %v", err)
 	}
 	store := newFileLifecycleStore(localDir)
-	record, err := store.Load(store.key("/response/P13/response.txt", hash))
+	record, err := store.Load(store.key("/response/P13/response.txt|2024-12-01", hash))
 	if err != nil {
 		t.Fatalf("Load() unexpected error: %v", err)
 	}
@@ -188,8 +188,10 @@ func TestProcessFileRecoversPendingFinalizationWithoutReload(t *testing.T) {
 	}
 	store := newFileLifecycleStore(localDir)
 	record := &fileLifecycleRecord{
-		Key:              store.key("/response/P13/response.txt", hash),
+		Key:              store.key("/response/P13/response.txt|2024-12-01", hash),
+		LogicalKey:       "/response/P13/response.txt|2024-12-01",
 		RemotePath:       "/response/P13/response.txt",
+		RequestedDate:    "2024-12-01",
 		Filename:         "response.txt",
 		SourceFolder:     "P13/P13",
 		DBID:             "1",
@@ -221,7 +223,7 @@ func TestProcessFileRecoversPendingFinalizationWithoutReload(t *testing.T) {
 		},
 	}
 
-	outcome, err := processFile(context.Background(), ftpMock, loader, &models.Config{LocalDir: localDir}, "response.txt", folder, logger)
+	outcome, err := processFile(context.Background(), ftpMock, loader, &models.Config{LocalDir: localDir}, "response.txt", folder, "2024-12-01", logger)
 	if err != nil {
 		t.Fatalf("processFile() unexpected error: %v", err)
 	}
@@ -279,7 +281,7 @@ func TestProcessFileQuarantinesRepeatedParseFailures(t *testing.T) {
 		},
 	}
 
-	_, err := processFile(context.Background(), ftpMock, loader, &models.Config{LocalDir: localDir}, "broken.txt", folder, logger)
+	_, err := processFile(context.Background(), ftpMock, loader, &models.Config{LocalDir: localDir}, "broken.txt", folder, "2024-12-01", logger)
 	if err == nil {
 		t.Fatal("processFile() expected parse error, got nil")
 	}
@@ -292,7 +294,7 @@ func TestProcessFileQuarantinesRepeatedParseFailures(t *testing.T) {
 
 	hash := sha256.Sum256(badContent)
 	store := newFileLifecycleStore(localDir)
-	record, err := store.Load(store.key("/response/P13/broken.txt", hex.EncodeToString(hash[:])))
+	record, err := store.Load(store.key("/response/P13/broken.txt|2024-12-01", hex.EncodeToString(hash[:])))
 	if err != nil {
 		t.Fatalf("Load() unexpected error: %v", err)
 	}
@@ -300,7 +302,7 @@ func TestProcessFileQuarantinesRepeatedParseFailures(t *testing.T) {
 		t.Fatalf("expected parse_failed lifecycle record, got %#v", record)
 	}
 
-	_, err = processFile(context.Background(), ftpMock, loader, &models.Config{LocalDir: localDir}, "broken.txt", folder, logger)
+	_, err = processFile(context.Background(), ftpMock, loader, &models.Config{LocalDir: localDir}, "broken.txt", folder, "2024-12-01", logger)
 	if err == nil {
 		t.Fatal("processFile() expected quarantined error on repeated parse failure")
 	}
@@ -337,8 +339,10 @@ func TestProcessFileReconcilesCorrectedReupload(t *testing.T) {
 
 	store := newFileLifecycleStore(localDir)
 	previousRecord := (&fileLifecycleRecord{
-		Key:              store.key("/response/P13/response.txt", hex.EncodeToString(oldHash[:])),
+		Key:              store.key("/response/P13/response.txt|2024-12-01", hex.EncodeToString(oldHash[:])),
+		LogicalKey:       "/response/P13/response.txt|2024-12-01",
 		RemotePath:       "/response/P13/response.txt",
+		RequestedDate:    "2024-12-01",
 		Filename:         "response.txt",
 		SourceFolder:     "P13/P13",
 		ContentHash:      hex.EncodeToString(oldHash[:]),
@@ -376,7 +380,7 @@ func TestProcessFileReconcilesCorrectedReupload(t *testing.T) {
 		},
 	}
 
-	_, err = processFile(context.Background(), ftpMock, loader, &models.Config{LocalDir: localDir}, "response.txt", folder, logger)
+	_, err = processFile(context.Background(), ftpMock, loader, &models.Config{LocalDir: localDir}, "response.txt", folder, "2024-12-01", logger)
 	if err != nil {
 		t.Fatalf("processFile() unexpected error: %v", err)
 	}
@@ -388,6 +392,71 @@ func TestProcessFileReconcilesCorrectedReupload(t *testing.T) {
 	}
 	if len(gotManifest["tx_document_open_42"]) != 1 || gotManifest["tx_document_open_42"][0] != 733685 {
 		t.Fatalf("stale manifest = %+v, want previous record manifest", gotManifest)
+	}
+}
+
+func TestProcessFileDoesNotReconcileDifferentRequestedDates(t *testing.T) {
+	localDir := t.TempDir()
+	folder := models.KassaFolder{
+		KassaCode:    "P13",
+		FolderName:   "P13",
+		ResponsePath: "/response/P13",
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	originalPath := filepath.Join(findRepoRoot(t), "data", "response.txt")
+	originalBytes, err := os.ReadFile(originalPath)
+	if err != nil {
+		t.Fatalf("ReadFile() unexpected error: %v", err)
+	}
+	oldHash := sha256.Sum256(originalBytes)
+
+	store := newFileLifecycleStore(localDir)
+	previousRecord := (&fileLifecycleRecord{
+		Key:              store.key("/response/P13/response.txt|2024-12-01", hex.EncodeToString(oldHash[:])),
+		LogicalKey:       "/response/P13/response.txt|2024-12-01",
+		RemotePath:       "/response/P13/response.txt",
+		RequestedDate:    "2024-12-01",
+		Filename:         "response.txt",
+		SourceFolder:     "P13/P13",
+		ContentHash:      hex.EncodeToString(oldHash[:]),
+		TransactionCount: 1,
+		TransactionManifest: map[string][]int64{
+			"tx_document_open_42": {733685},
+		},
+		Stage:     fileLifecycleStageCompleted,
+		UpdatedAt: time.Now(),
+	}).withStage(fileLifecycleStageCompleted, "")
+	if err := store.SaveLatest(previousRecord); err != nil {
+		t.Fatalf("SaveLatest() unexpected error: %v", err)
+	}
+
+	reconcileCalls := 0
+	ftpMock := &ftpclient.MockClient{
+		DownloadFileFunc: func(remotePath, localPath string) error {
+			if err := os.MkdirAll(filepath.Dir(localPath), 0750); err != nil {
+				return err
+			}
+			return os.WriteFile(localPath, originalBytes, 0640)
+		},
+		MarkFileAsProcessedFunc: func(remotePath string) error { return nil },
+	}
+	loader := &mockFileLoader{
+		getTransactionCount: func(transactions map[string]interface{}) int { return 1346 },
+		loadFileDataWithReconcile: func(ctx context.Context, sourceFolder string, staleManifest map[string][]int64, transactions map[string]interface{}) error {
+			reconcileCalls++
+			if len(staleManifest) != 0 {
+				t.Fatalf("staleManifest = %+v, want empty for different requested date", staleManifest)
+			}
+			return nil
+		},
+	}
+
+	_, err = processFile(context.Background(), ftpMock, loader, &models.Config{LocalDir: localDir}, "response.txt", folder, "2024-12-02", logger)
+	if err != nil {
+		t.Fatalf("processFile() unexpected error: %v", err)
+	}
+	if reconcileCalls != 1 {
+		t.Fatalf("LoadFileDataWithReconcile() calls = %d, want 1", reconcileCalls)
 	}
 }
 

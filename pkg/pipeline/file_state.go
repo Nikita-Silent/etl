@@ -25,7 +25,9 @@ const (
 
 type fileLifecycleRecord struct {
 	Key                 string             `json:"key"`
+	LogicalKey          string             `json:"logical_key"`
 	RemotePath          string             `json:"remote_path"`
+	RequestedDate       string             `json:"requested_date,omitempty"`
 	Filename            string             `json:"filename"`
 	SourceFolder        string             `json:"source_folder"`
 	DBID                string             `json:"db_id,omitempty"`
@@ -46,10 +48,12 @@ func newFileLifecycleStore(baseDir string) *fileLifecycleStore {
 	return &fileLifecycleStore{root: filepath.Join(baseDir, ".etl-state")}
 }
 
-func newFileLifecycleRecord(store *fileLifecycleStore, remotePath string, filename string, sourceFolder string, header *models.FileHeader, contentHash string, transactionCount int) *fileLifecycleRecord {
+func newFileLifecycleRecord(store *fileLifecycleStore, logicalKey string, remotePath string, requestedDate string, filename string, sourceFolder string, header *models.FileHeader, contentHash string, transactionCount int) *fileLifecycleRecord {
 	record := &fileLifecycleRecord{
-		Key:              store.key(remotePath, contentHash),
+		Key:              store.key(logicalKey, contentHash),
+		LogicalKey:       logicalKey,
 		RemotePath:       remotePath,
+		RequestedDate:    requestedDate,
 		Filename:         filename,
 		SourceFolder:     sourceFolder,
 		ContentHash:      contentHash,
@@ -79,8 +83,8 @@ func (r *fileLifecycleRecord) withStage(stage fileLifecycleStage, lastError stri
 	return &clone
 }
 
-func (s *fileLifecycleStore) key(remotePath string, contentHash string) string {
-	sum := sha256.Sum256([]byte(remotePath + "|" + contentHash))
+func (s *fileLifecycleStore) key(logicalKey string, contentHash string) string {
+	sum := sha256.Sum256([]byte(logicalKey + "|" + contentHash))
 	return hex.EncodeToString(sum[:])
 }
 
@@ -88,8 +92,8 @@ func (s *fileLifecycleStore) pathFor(key string) string {
 	return filepath.Join(s.root, key+".json")
 }
 
-func (s *fileLifecycleStore) latestPathFor(remotePath string) string {
-	sum := sha256.Sum256([]byte(remotePath))
+func (s *fileLifecycleStore) latestPathFor(logicalKey string) string {
+	sum := sha256.Sum256([]byte(logicalKey))
 	return filepath.Join(s.root, "latest", hex.EncodeToString(sum[:])+".json")
 }
 
@@ -134,7 +138,7 @@ func (s *fileLifecycleStore) Save(record *fileLifecycleRecord) error {
 }
 
 func (s *fileLifecycleStore) SaveLatest(record *fileLifecycleRecord) error {
-	latestDir := filepath.Dir(s.latestPathFor(record.RemotePath))
+	latestDir := filepath.Dir(s.latestPathFor(record.LogicalKey))
 	if err := os.MkdirAll(latestDir, 0750); err != nil {
 		return fmt.Errorf("create lifecycle latest directory: %w", err)
 	}
@@ -142,7 +146,7 @@ func (s *fileLifecycleStore) SaveLatest(record *fileLifecycleRecord) error {
 	if err != nil {
 		return fmt.Errorf("encode latest lifecycle state: %w", err)
 	}
-	path := s.latestPathFor(record.RemotePath)
+	path := s.latestPathFor(record.LogicalKey)
 	tempPath := path + ".tmp"
 	// #nosec G306 -- state files are internal process artifacts under LOCAL_DIR/.etl-state.
 	if err := os.WriteFile(tempPath, data, 0640); err != nil {
@@ -154,8 +158,8 @@ func (s *fileLifecycleStore) SaveLatest(record *fileLifecycleRecord) error {
 	return nil
 }
 
-func (s *fileLifecycleStore) LoadLatestByRemotePath(remotePath string) (*fileLifecycleRecord, error) {
-	path := s.latestPathFor(remotePath)
+func (s *fileLifecycleStore) LoadLatest(logicalKey string) (*fileLifecycleRecord, error) {
+	path := s.latestPathFor(logicalKey)
 	// #nosec G304 -- path is derived from controlled LOCAL_DIR/.etl-state paths.
 	data, err := os.ReadFile(path)
 	if err != nil {

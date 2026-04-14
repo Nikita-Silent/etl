@@ -522,7 +522,7 @@ func processFolderLoad(ctx context.Context, ftpClient ftp.FTPClient, loader file
 	result.Detail.Status = "processing_response"
 
 	for _, file := range responseFiles {
-		outcome, err := processFile(ctx, ftpClient, loader, cfg, file.Name, folder, logger)
+		outcome, err := processFile(ctx, ftpClient, loader, cfg, file.Name, folder, date, logger)
 		if err != nil {
 			recordError(stageForFileError(err), file.Name, folder.ResponsePath, err)
 			continue
@@ -599,7 +599,7 @@ func listProcessableResponseFiles(ftpClient ftp.FTPClient, responsePath string) 
 
 // processFile обрабатывает один файл из FTP
 // Возвращает количество транзакций, детальную статистику и ошибку
-func processFile(ctx context.Context, ftpClient ftp.FTPClient, loader fileLoader, cfg *models.Config, filename string, folder models.KassaFolder, logger *slog.Logger) (fileProcessOutcome, error) {
+func processFile(ctx context.Context, ftpClient ftp.FTPClient, loader fileLoader, cfg *models.Config, filename string, folder models.KassaFolder, requestedDate string, logger *slog.Logger) (fileProcessOutcome, error) {
 	outcome := fileProcessOutcome{}
 	store := newFileLifecycleStore(cfg.LocalDir)
 
@@ -607,6 +607,7 @@ func processFile(ctx context.Context, ftpClient ftp.FTPClient, loader fileLoader
 	// Используем уникальный путь для локального файла, включая информацию о папке,
 	// чтобы избежать конфликтов при параллельной обработке файлов с одинаковыми именами из разных папок
 	remotePath := folder.ResponsePath + "/" + filename
+	logicalKey := remotePath + "|" + requestedDate
 	// Создаем уникальный локальный путь: LocalDir/KassaCode/FolderName/filename
 	localPath := fmt.Sprintf("%s/%s/%s/%s", cfg.LocalDir, folder.KassaCode, folder.FolderName, filename)
 
@@ -638,11 +639,11 @@ func processFile(ctx context.Context, ftpClient ftp.FTPClient, loader fileLoader
 		return outcome, newStagedFileError("file_hash_error", fmt.Errorf("failed to hash file: %w", err))
 	}
 
-	existingState, err := store.Load(store.key(remotePath, contentHash))
+	existingState, err := store.Load(store.key(logicalKey, contentHash))
 	if err != nil {
 		return outcome, newStagedFileError("file_state_load_error", fmt.Errorf("failed to load file lifecycle state: %w", err))
 	}
-	latestState, err := store.LoadLatestByRemotePath(remotePath)
+	latestState, err := store.LoadLatest(logicalKey)
 	if err != nil {
 		return outcome, newStagedFileError("file_state_load_error", fmt.Errorf("failed to load latest file lifecycle state: %w", err))
 	}
@@ -679,7 +680,7 @@ func processFile(ctx context.Context, ftpClient ftp.FTPClient, loader fileLoader
 	// Парсим файл
 	transactions, header, err := parser.ParseFile(localPath, sourceFolder)
 	if err != nil {
-		record := newFileLifecycleRecord(store, remotePath, filename, sourceFolder, nil, contentHash, 0)
+		record := newFileLifecycleRecord(store, logicalKey, remotePath, requestedDate, filename, sourceFolder, nil, contentHash, 0)
 		if saveErr := store.Save(record.withStage(fileLifecycleStageParseFailed, err.Error())); saveErr != nil {
 			return outcome, newStagedFileError("file_parse_error", fmt.Errorf("failed to parse file: %w (also failed to persist parse failure: %v)", err, saveErr))
 		}
@@ -701,7 +702,7 @@ func processFile(ctx context.Context, ftpClient ftp.FTPClient, loader fileLoader
 			"file", filename,
 			"event", "file_already_processed",
 		)
-		record := newFileLifecycleRecord(store, remotePath, filename, sourceFolder, header, contentHash, 0)
+		record := newFileLifecycleRecord(store, logicalKey, remotePath, requestedDate, filename, sourceFolder, header, contentHash, 0)
 		if err := finalizeFileLifecycle(ctx, ftpClient, store, record, logger); err != nil {
 			return outcome, newStagedFileError("file_finalize_error", err)
 		}
@@ -715,7 +716,7 @@ func processFile(ctx context.Context, ftpClient ftp.FTPClient, loader fileLoader
 	if err != nil {
 		return outcome, newStagedFileError("file_manifest_error", fmt.Errorf("failed to build transaction manifest: %w", err))
 	}
-	record := newFileLifecycleRecord(store, remotePath, filename, sourceFolder, header, contentHash, transactionCount).withManifest(manifest)
+	record := newFileLifecycleRecord(store, logicalKey, remotePath, requestedDate, filename, sourceFolder, header, contentHash, transactionCount).withManifest(manifest)
 
 	logger.InfoContext(ctx, "Found transactions in file",
 		"file", filename,
