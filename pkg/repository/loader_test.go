@@ -603,14 +603,17 @@ func TestLoadFileDataWithReconcileDeletesStaleRowsDeterministically(t *testing.T
 		"tx_bonus_accrual_9": []models.TxBonusAccrual9{{TransactionIDUnique: 21}},
 	}
 
-	if err := loader.LoadFileDataWithReconcile(context.Background(), "P13/P13", staleManifest, transactions); err != nil {
+	if err := loader.LoadFileDataWithReconcile(context.Background(), &models.FileLoadState{LogicalKey: "/response/P13/response.txt|2024-12-01", SourceFolder: "P13/P13"}, staleManifest, transactions); err != nil {
 		t.Fatalf("LoadFileDataWithReconcile() unexpected error: %v", err)
 	}
-	if len(tx.execSQL) != 2 {
-		t.Fatalf("Exec() calls = %d, want 2", len(tx.execSQL))
+	if len(tx.execSQL) != 3 {
+		t.Fatalf("Exec() calls = %d, want 3", len(tx.execSQL))
 	}
 	if !strings.Contains(tx.execSQL[0], "tx_bonus_accrual_9") || !strings.Contains(tx.execSQL[1], "tx_special_price_3") {
 		t.Fatalf("Exec() order = %v, want bonus then special", tx.execSQL)
+	}
+	if !strings.Contains(tx.execSQL[2], "etl_file_load_state") {
+		t.Fatalf("Exec() final statement = %q, want etl_file_load_state upsert", tx.execSQL[2])
 	}
 	wantLoadOrder := []string{"tx_bonus_accrual_9", "tx_special_price_3"}
 	for i := range wantLoadOrder {

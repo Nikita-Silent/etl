@@ -310,6 +310,17 @@ type FileHeader struct {
 	ReportNum string `json:"report_num"`
 }
 
+// FileLoadState represents durable metadata about a successfully loaded logical file.
+type FileLoadState struct {
+	LogicalKey          string             `json:"logical_key"`
+	RemotePath          string             `json:"remote_path"`
+	RequestedDate       string             `json:"requested_date,omitempty"`
+	SourceFolder        string             `json:"source_folder"`
+	ContentHash         string             `json:"content_hash"`
+	TransactionManifest map[string][]int64 `json:"transaction_manifest,omitempty"`
+	UpdatedAt           time.Time          `json:"updated_at"`
+}
+
 // ProcessingStats represents processing statistics
 type ProcessingStats struct {
 	StartTime          time.Time

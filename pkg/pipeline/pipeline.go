@@ -22,7 +22,8 @@ import (
 type fileLoader interface {
 	GetTransactionCount(transactions map[string]interface{}) int
 	LoadFileData(ctx context.Context, transactions map[string]interface{}) error
-	LoadFileDataWithReconcile(ctx context.Context, sourceFolder string, staleManifest map[string][]int64, transactions map[string]interface{}) error
+	LoadFileDataWithReconcile(ctx context.Context, fileState *models.FileLoadState, staleManifest map[string][]int64, transactions map[string]interface{}) error
+	GetFileLoadState(ctx context.Context, logicalKey string) (*models.FileLoadState, error)
 	GetTransactionDetails(transactions map[string]interface{}) []map[string]interface{}
 }
 
@@ -638,14 +639,14 @@ func processFile(ctx context.Context, ftpClient ftp.FTPClient, loader fileLoader
 	if err != nil {
 		return outcome, newStagedFileError("file_hash_error", fmt.Errorf("failed to hash file: %w", err))
 	}
+	dbState, err := loader.GetFileLoadState(ctx, logicalKey)
+	if err != nil {
+		return outcome, newStagedFileError("file_state_load_error", fmt.Errorf("failed to load durable file state: %w", err))
+	}
 
 	existingState, err := store.Load(store.key(logicalKey, contentHash))
 	if err != nil {
 		return outcome, newStagedFileError("file_state_load_error", fmt.Errorf("failed to load file lifecycle state: %w", err))
-	}
-	latestState, err := store.LoadLatest(logicalKey)
-	if err != nil {
-		return outcome, newStagedFileError("file_state_load_error", fmt.Errorf("failed to load latest file lifecycle state: %w", err))
 	}
 	if existingState != nil {
 		switch existingState.Stage {
@@ -664,13 +665,14 @@ func processFile(ctx context.Context, ftpClient ftp.FTPClient, loader fileLoader
 			return outcome, newStagedFileError("file_quarantined", fmt.Errorf("file is quarantined after previous parse failure: %s", existingState.LastError))
 		}
 	}
-	if latestState != nil && latestState.Stage == fileLifecycleStageCompleted && latestState.ContentHash == contentHash {
+	if dbState != nil && dbState.ContentHash == contentHash {
 		logger.InfoContext(ctx, "File content already loaded previously, finalizing FTP state without reload",
 			"file", filename,
 			"remote_path", remotePath,
 			"event", "file_duplicate_finalize",
 		)
-		if err := finalizeFileLifecycle(ctx, ftpClient, store, latestState, logger); err != nil {
+		record := newFileLifecycleRecord(store, logicalKey, remotePath, requestedDate, filename, sourceFolder, nil, contentHash, 0)
+		if err := finalizeFileLifecycle(ctx, ftpClient, store, record.withManifest(dbState.TransactionManifest).withStage(fileLifecycleStageCompleted, ""), logger); err != nil {
 			return outcome, newStagedFileError("file_finalize_error", err)
 		}
 		outcome.Recovered = true
@@ -725,12 +727,12 @@ func processFile(ctx context.Context, ftpClient ftp.FTPClient, loader fileLoader
 	)
 
 	staleManifest := map[string][]int64(nil)
-	if latestState != nil && latestState.Stage == fileLifecycleStageCompleted && latestState.ContentHash != contentHash {
-		staleManifest = latestState.TransactionManifest
+	if dbState != nil && dbState.ContentHash != contentHash {
+		staleManifest = dbState.TransactionManifest
 		logger.InfoContext(ctx, "Detected corrected reupload, reconciling stale rows before reload",
 			"file", filename,
 			"remote_path", remotePath,
-			"previous_hash", latestState.ContentHash,
+			"previous_hash", dbState.ContentHash,
 			"current_hash", contentHash,
 			"event", "file_reupload_reconcile",
 		)
@@ -743,7 +745,15 @@ func processFile(ctx context.Context, ftpClient ftp.FTPClient, loader fileLoader
 		loadCtx, loadCancel := context.WithTimeout(ctx, cfg.EffectivePipelineLoadTimeout())
 		defer loadCancel()
 
-		if err := loader.LoadFileDataWithReconcile(loadCtx, sourceFolder, staleManifest, transactions); err != nil {
+		durableState := &models.FileLoadState{
+			LogicalKey:          logicalKey,
+			RemotePath:          remotePath,
+			RequestedDate:       requestedDate,
+			SourceFolder:        sourceFolder,
+			ContentHash:         contentHash,
+			TransactionManifest: manifest,
+		}
+		if err := loader.LoadFileDataWithReconcile(loadCtx, durableState, staleManifest, transactions); err != nil {
 			return outcome, newStagedFileError("file_load_error", fmt.Errorf("failed to load data: %w", err))
 		}
 		logger.InfoContext(ctx, "Successfully loaded transactions into database",

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -88,14 +89,14 @@ func isRetryableError(err error) bool {
 // LoadFileData loads all transaction data from a file into the database
 // Implements retry logic with exponential backoff for deadlock errors
 func (l *Loader) LoadFileData(ctx context.Context, transactions map[string]interface{}) error {
-	return l.loadFileData(ctx, "", nil, transactions)
+	return l.loadFileData(ctx, nil, nil, transactions)
 }
 
-func (l *Loader) LoadFileDataWithReconcile(ctx context.Context, sourceFolder string, staleManifest map[string][]int64, transactions map[string]interface{}) error {
-	return l.loadFileData(ctx, sourceFolder, staleManifest, transactions)
+func (l *Loader) LoadFileDataWithReconcile(ctx context.Context, fileState *models.FileLoadState, staleManifest map[string][]int64, transactions map[string]interface{}) error {
+	return l.loadFileData(ctx, fileState, staleManifest, transactions)
 }
 
-func (l *Loader) loadFileData(ctx context.Context, sourceFolder string, staleManifest map[string][]int64, transactions map[string]interface{}) error {
+func (l *Loader) loadFileData(ctx context.Context, fileState *models.FileLoadState, staleManifest map[string][]int64, transactions map[string]interface{}) error {
 	// Log all transaction types found
 	slog.DebugContext(ctx, "Transaction types found", "event", "transaction_type_scan")
 	for tableName, data := range transactions {
@@ -127,6 +128,10 @@ func (l *Loader) loadFileData(ctx context.Context, sourceFolder string, staleMan
 		loadErr := func() error {
 			defer func() { _ = tx.Rollback(ctx) }() // Always rollback on error
 
+			sourceFolder := ""
+			if fileState != nil {
+				sourceFolder = fileState.SourceFolder
+			}
 			if err := l.deleteStaleRows(ctx, tx, sourceFolder, staleManifest); err != nil {
 				return fmt.Errorf("failed to reconcile stale file rows: %w", err)
 			}
@@ -135,6 +140,12 @@ func (l *Loader) loadFileData(ctx context.Context, sourceFolder string, staleMan
 				data := transactions[tableName]
 				if err := l.loadTransactionType(ctx, tx, tableName, data); err != nil {
 					return fmt.Errorf("failed to load %s: %w", tableName, err)
+				}
+			}
+
+			if fileState != nil {
+				if err := l.upsertFileLoadState(ctx, tx, fileState); err != nil {
+					return fmt.Errorf("failed to persist file load state: %w", err)
 				}
 			}
 
@@ -188,6 +199,62 @@ func (l *Loader) loadFileData(ctx context.Context, sourceFolder string, staleMan
 	}
 
 	return fmt.Errorf("failed after %d retries: %w", l.policy.maxRetries, lastErr)
+}
+
+func (l *Loader) GetFileLoadState(ctx context.Context, logicalKey string) (*models.FileLoadState, error) {
+	if logicalKey == "" {
+		return nil, nil
+	}
+
+	var state models.FileLoadState
+	var manifestBytes []byte
+	err := l.db.QueryRow(ctx, `
+		SELECT logical_key, remote_path, COALESCE(requested_date::text, ''), source_folder, content_hash, transaction_manifest, updated_at
+		FROM etl_file_load_state
+		WHERE logical_key = $1
+	`, logicalKey).Scan(&state.LogicalKey, &state.RemotePath, &state.RequestedDate, &state.SourceFolder, &state.ContentHash, &manifestBytes, &state.UpdatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("query file load state: %w", err)
+	}
+	if len(manifestBytes) > 0 {
+		if err := json.Unmarshal(manifestBytes, &state.TransactionManifest); err != nil {
+			return nil, fmt.Errorf("decode file load manifest: %w", err)
+		}
+	}
+	return &state, nil
+}
+
+func (l *Loader) upsertFileLoadState(ctx context.Context, tx pgx.Tx, fileState *models.FileLoadState) error {
+	manifestBytes, err := json.Marshal(fileState.TransactionManifest)
+	if err != nil {
+		return fmt.Errorf("encode file load manifest: %w", err)
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO etl_file_load_state (
+			logical_key,
+			remote_path,
+			requested_date,
+			source_folder,
+			content_hash,
+			transaction_manifest,
+			updated_at
+		) VALUES ($1, $2, NULLIF($3, '')::date, $4, $5, $6::jsonb, NOW())
+		ON CONFLICT (logical_key)
+		DO UPDATE SET
+			remote_path = EXCLUDED.remote_path,
+			requested_date = EXCLUDED.requested_date,
+			source_folder = EXCLUDED.source_folder,
+			content_hash = EXCLUDED.content_hash,
+			transaction_manifest = EXCLUDED.transaction_manifest,
+			updated_at = NOW()
+	`, fileState.LogicalKey, fileState.RemotePath, fileState.RequestedDate, fileState.SourceFolder, fileState.ContentHash, string(manifestBytes))
+	if err != nil {
+		return fmt.Errorf("upsert etl_file_load_state: %w", err)
+	}
+	return nil
 }
 
 // loadTransactionType loads a specific transaction type
