@@ -3,6 +3,7 @@ package parser
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/user/go-frontol-loader/pkg/models"
 )
+
+const maxScannerTokenSize = 4 * 1024 * 1024
 
 // ParseFile parses a Frontol file and returns all transaction data grouped by type
 func ParseFile(filePath string, sourceFolder string) (map[string]interface{}, *models.FileHeader, error) {
@@ -32,7 +35,7 @@ func ParseFile(filePath string, sourceFolder string) (map[string]interface{}, *m
 
 	// Reset file position to beginning and skip header
 	_, _ = file.Seek(0, 0)
-	scanner := bufio.NewScanner(file)
+	scanner := newScanner(file)
 
 	// Skip first 3 lines (header)
 	for i := 0; i < 3; i++ {
@@ -52,7 +55,7 @@ func ParseFile(filePath string, sourceFolder string) (map[string]interface{}, *m
 
 // parseFileHeader parses the first 3 lines of the file
 func parseFileHeader(file *os.File) (*models.FileHeader, error) {
-	scanner := bufio.NewScanner(file)
+	scanner := newScanner(file)
 
 	// Read first line (processed flag)
 	if !scanner.Scan() {
@@ -519,7 +522,18 @@ func parseTransactions(scanner *bufio.Scanner, sourceFolder string) (map[string]
 		result["tx_mark_unit_121"] = txMarkUnits121
 	}
 
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scanner error: %w", err)
+	}
+
 	return result, nil
+}
+
+func newScanner(r io.Reader) *bufio.Scanner {
+	scanner := bufio.NewScanner(r)
+	buffer := make([]byte, 0, 64*1024)
+	scanner.Buffer(buffer, maxScannerTokenSize)
+	return scanner
 }
 
 // parseTransactionLine parses a single transaction line

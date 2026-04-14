@@ -1,13 +1,74 @@
 package repository
 
 import (
+	"context"
+	"errors"
 	"math"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/user/go-frontol-loader/pkg/models"
 )
+
+type fakeTx struct {
+	commitCalls   int
+	rollbackCalls int
+	execSQL       []string
+}
+
+func (f *fakeTx) Begin(ctx context.Context) (pgx.Tx, error) { return f, nil }
+func (f *fakeTx) Commit(ctx context.Context) error {
+	f.commitCalls++
+	return nil
+}
+func (f *fakeTx) Rollback(ctx context.Context) error {
+	f.rollbackCalls++
+	return nil
+}
+func (f *fakeTx) CopyFrom(ctx context.Context, tableName pgx.Identifier, columnNames []string, rowSrc pgx.CopyFromSource) (int64, error) {
+	return 0, nil
+}
+func (f *fakeTx) SendBatch(ctx context.Context, b *pgx.Batch) pgx.BatchResults { return nil }
+func (f *fakeTx) LargeObjects() pgx.LargeObjects                               { return pgx.LargeObjects{} }
+func (f *fakeTx) Prepare(ctx context.Context, name, sql string) (*pgconn.StatementDescription, error) {
+	return nil, nil
+}
+func (f *fakeTx) Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error) {
+	f.execSQL = append(f.execSQL, sql)
+	return pgconn.CommandTag{}, nil
+}
+func (f *fakeTx) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	return nil, nil
+}
+func (f *fakeTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row { return nil }
+func (f *fakeTx) Conn() *pgx.Conn                                               { return nil }
+
+type loaderDBMock struct {
+	beginTxFunc     func(ctx context.Context) (pgx.Tx, error)
+	loadTxTableFunc func(ctx context.Context, tx pgx.Tx, tableName string, data interface{}) error
+}
+
+func (m *loaderDBMock) BeginTx(ctx context.Context) (pgx.Tx, error) {
+	if m.beginTxFunc != nil {
+		return m.beginTxFunc(ctx)
+	}
+	return &fakeTx{}, nil
+}
+func (m *loaderDBMock) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
+	return nil, nil
+}
+func (m *loaderDBMock) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
+	return nil
+}
+func (m *loaderDBMock) LoadTxTable(ctx context.Context, tx pgx.Tx, tableName string, data interface{}) error {
+	if m.loadTxTableFunc != nil {
+		return m.loadTxTableFunc(ctx, tx, tableName, data)
+	}
+	return nil
+}
 
 // TestIsRetryableError tests the retryable error detection.
 func TestIsRetryableError(t *testing.T) {
@@ -188,6 +249,28 @@ func TestGetTransactionDetails(t *testing.T) {
 				t.Errorf("GetTransactionDetails() total count = %d, want %d", sum, tt.expectedSum)
 			}
 		})
+	}
+}
+
+func TestGetTransactionDetailsSortedByTableName(t *testing.T) {
+	loader := &Loader{db: nil}
+	transactions := map[string]interface{}{
+		"tx_special_price_3":        []models.TxSpecialPrice3{{TransactionIDUnique: 10}},
+		"tx_bonus_accrual_9":        []models.TxBonusAccrual9{{TransactionIDUnique: 20}},
+		"tx_item_registration_1_11": []models.TxItemRegistration1_11{{TransactionIDUnique: 1}},
+	}
+
+	details := loader.GetTransactionDetails(transactions)
+	gotOrder := []string{
+		details[0]["table_name"].(string),
+		details[1]["table_name"].(string),
+		details[2]["table_name"].(string),
+	}
+	wantOrder := []string{"tx_bonus_accrual_9", "tx_item_registration_1_11", "tx_special_price_3"}
+	for i := range wantOrder {
+		if gotOrder[i] != wantOrder[i] {
+			t.Fatalf("GetTransactionDetails() order = %v, want %v", gotOrder, wantOrder)
+		}
 	}
 }
 
@@ -375,6 +458,165 @@ func TestSliceLen(t *testing.T) {
 				t.Fatalf("sliceLen() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestOrderedTransactionTables(t *testing.T) {
+	transactions := map[string]interface{}{
+		"tx_special_price_3":        []models.TxSpecialPrice3{{TransactionIDUnique: 10}},
+		"tx_bonus_accrual_9":        []models.TxBonusAccrual9{{TransactionIDUnique: 20}},
+		"tx_item_registration_1_11": []models.TxItemRegistration1_11{},
+		"unknown":                   42,
+	}
+
+	got := orderedTransactionTables(transactions)
+	want := []string{"tx_bonus_accrual_9", "tx_special_price_3", "unknown"}
+	if len(got) != len(want) {
+		t.Fatalf("orderedTransactionTables() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("orderedTransactionTables() = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestRetryPolicyBackoffCapsAtMax(t *testing.T) {
+	policy := retryPolicy{initialBackoff: 100 * time.Millisecond, maxBackoff: 250 * time.Millisecond}
+	if got := policy.retryBackoff(0); got != 100*time.Millisecond {
+		t.Fatalf("retryBackoff(0) = %v, want %v", got, 100*time.Millisecond)
+	}
+	if got := policy.retryBackoff(1); got != 200*time.Millisecond {
+		t.Fatalf("retryBackoff(1) = %v, want %v", got, 200*time.Millisecond)
+	}
+	if got := policy.retryBackoff(3); got != 250*time.Millisecond {
+		t.Fatalf("retryBackoff(3) = %v, want %v", got, 250*time.Millisecond)
+	}
+}
+
+func TestLoadFileDataLoadsTablesInDeterministicOrder(t *testing.T) {
+	order := make([]string, 0, 3)
+	tx := &fakeTx{}
+	loader := newLoaderWithDB(&loaderDBMock{
+		beginTxFunc: func(ctx context.Context) (pgx.Tx, error) {
+			return tx, nil
+		},
+		loadTxTableFunc: func(ctx context.Context, tx pgx.Tx, tableName string, data interface{}) error {
+			order = append(order, tableName)
+			return nil
+		},
+	})
+	loader.policy = retryPolicy{maxRetries: 1, initialBackoff: 0, maxBackoff: 0}
+
+	transactions := map[string]interface{}{
+		"tx_special_price_3":        []models.TxSpecialPrice3{{TransactionIDUnique: 10}},
+		"tx_bonus_accrual_9":        []models.TxBonusAccrual9{{TransactionIDUnique: 20}},
+		"tx_item_registration_1_11": []models.TxItemRegistration1_11{{TransactionIDUnique: 1}},
+	}
+
+	if err := loader.LoadFileData(context.Background(), transactions); err != nil {
+		t.Fatalf("LoadFileData() unexpected error: %v", err)
+	}
+	want := []string{"tx_bonus_accrual_9", "tx_item_registration_1_11", "tx_special_price_3"}
+	for i := range want {
+		if order[i] != want[i] {
+			t.Fatalf("LoadFileData() order = %v, want %v", order, want)
+		}
+	}
+	if tx.commitCalls != 1 {
+		t.Fatalf("Commit() calls = %d, want 1", tx.commitCalls)
+	}
+}
+
+func TestLoadFileDataRetriesRetryableErrors(t *testing.T) {
+	attempts := 0
+	loader := newLoaderWithDB(&loaderDBMock{
+		beginTxFunc: func(ctx context.Context) (pgx.Tx, error) {
+			return &fakeTx{}, nil
+		},
+		loadTxTableFunc: func(ctx context.Context, tx pgx.Tx, tableName string, data interface{}) error {
+			attempts++
+			if attempts == 1 {
+				return &pgconn.PgError{Code: "40001"}
+			}
+			return nil
+		},
+	})
+	loader.policy = retryPolicy{maxRetries: 2, initialBackoff: 0, maxBackoff: 0}
+
+	err := loader.LoadFileData(context.Background(), map[string]interface{}{
+		"tx_item_registration_1_11": []models.TxItemRegistration1_11{{TransactionIDUnique: 1}},
+	})
+	if err != nil {
+		t.Fatalf("LoadFileData() unexpected error: %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("LoadFileData() attempts = %d, want 2", attempts)
+	}
+}
+
+func TestLoadFileDataStopsOnNonRetryableErrors(t *testing.T) {
+	attempts := 0
+	loader := newLoaderWithDB(&loaderDBMock{
+		beginTxFunc: func(ctx context.Context) (pgx.Tx, error) {
+			return &fakeTx{}, nil
+		},
+		loadTxTableFunc: func(ctx context.Context, tx pgx.Tx, tableName string, data interface{}) error {
+			attempts++
+			return errors.New("constraint violation")
+		},
+	})
+	loader.policy = retryPolicy{maxRetries: 3, initialBackoff: 0, maxBackoff: 0}
+
+	err := loader.LoadFileData(context.Background(), map[string]interface{}{
+		"tx_item_registration_1_11": []models.TxItemRegistration1_11{{TransactionIDUnique: 1}},
+	})
+	if err == nil {
+		t.Fatal("LoadFileData() expected error, got nil")
+	}
+	if attempts != 1 {
+		t.Fatalf("LoadFileData() attempts = %d, want 1", attempts)
+	}
+}
+
+func TestLoadFileDataWithReconcileDeletesStaleRowsDeterministically(t *testing.T) {
+	loadOrder := make([]string, 0, 2)
+	tx := &fakeTx{}
+	loader := newLoaderWithDB(&loaderDBMock{
+		beginTxFunc: func(ctx context.Context) (pgx.Tx, error) {
+			return tx, nil
+		},
+		loadTxTableFunc: func(ctx context.Context, tx pgx.Tx, tableName string, data interface{}) error {
+			loadOrder = append(loadOrder, tableName)
+			return nil
+		},
+	})
+	loader.policy = retryPolicy{maxRetries: 1, initialBackoff: 0, maxBackoff: 0}
+
+	staleManifest := map[string][]int64{
+		"tx_special_price_3":        {10},
+		"tx_bonus_accrual_9":        {20},
+		"tx_item_registration_1_11": {},
+	}
+	transactions := map[string]interface{}{
+		"tx_special_price_3": []models.TxSpecialPrice3{{TransactionIDUnique: 11}},
+		"tx_bonus_accrual_9": []models.TxBonusAccrual9{{TransactionIDUnique: 21}},
+	}
+
+	if err := loader.LoadFileDataWithReconcile(context.Background(), "P13/P13", staleManifest, transactions); err != nil {
+		t.Fatalf("LoadFileDataWithReconcile() unexpected error: %v", err)
+	}
+	if len(tx.execSQL) != 2 {
+		t.Fatalf("Exec() calls = %d, want 2", len(tx.execSQL))
+	}
+	if !strings.Contains(tx.execSQL[0], "tx_bonus_accrual_9") || !strings.Contains(tx.execSQL[1], "tx_special_price_3") {
+		t.Fatalf("Exec() order = %v, want bonus then special", tx.execSQL)
+	}
+	wantLoadOrder := []string{"tx_bonus_accrual_9", "tx_special_price_3"}
+	for i := range wantLoadOrder {
+		if loadOrder[i] != wantLoadOrder[i] {
+			t.Fatalf("load order = %v, want %v", loadOrder, wantLoadOrder)
+		}
 	}
 }
 

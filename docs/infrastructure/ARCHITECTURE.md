@@ -39,6 +39,8 @@
 - Graceful shutdown
 - Structured logging (zerolog по умолчанию, фолбэк на slog через `LOG_BACKEND`)
 - Интерактивная API документация (Scalar)
+- In-memory очередь для `load` операций с последовательной обработкой
+- Синхронная выгрузка `GET /api/files` без фонового использования `ResponseWriter`
 
 **Endpoints:**
 - `POST /api/load` - Запуск ETL для указанной даты
@@ -85,7 +87,8 @@
 
 - **PostgreSQL (внешний кластер)** — хранилище данных ETL.
 - **FTP сервер (`ftp-server`)** — источник файлов Frontol.
-- **In-memory очереди** — последовательная обработка запросов внутри `webhook-server` по типам операций (load/download), без внешнего брокера.
+- **In-memory очередь load-операций** — последовательная обработка `POST /api/load` внутри `webhook-server` без внешнего брокера.
+- **Синхронный download path** — `GET /api/files` выгружает данные напрямую в рамках HTTP запроса и не ставится в очередь.
 
 ---
 
@@ -394,7 +397,7 @@ cmd/webhook-server
     ├── pkg/logger
     ├── pkg/server ──┐
     ├── pkg/pipeline │
-    └── pkg/validator
+    └── pkg/validation
             │
             ▼
         pkg/models

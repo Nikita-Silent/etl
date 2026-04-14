@@ -173,7 +173,7 @@ Host: localhost:$SERVER_PORT
 
 Выгрузка данных из БД в файл по параметрам `source_folder` и `date`.
 Подробная схема запроса и ответов — в `api/openapi.yaml`.
-> Endpoint синхронный: ответ стримится сразу, поэтому операция обрабатывается в in-memory очереди процесса.
+> Endpoint синхронный: ответ стримится сразу в рамках HTTP запроса и не ставится в in-memory очередь.
 
 ---
 
@@ -185,6 +185,7 @@ Host: localhost:$SERVER_PORT
 **Поля ответа (фактическая реализация):**
 - `queue_provider` — `memory`
 - `total_queue_size`, `load_queue_size`, `download_queue_size`, `active_operations` — состояние in-memory очередей.
+- `is_shutting_down` — сервер находится в процессе graceful shutdown.
 
 ---
 
@@ -195,7 +196,7 @@ Host: localhost:$SERVER_PORT
 
 ### Асинхронная обработка
 
-После получения `202 Accepted`, ETL pipeline запускается в горутине (асинхронно).
+После получения `202 Accepted`, запрос попадает во внутреннюю in-memory очередь `load`, а ETL выполняется отдельным queue worker.
 
 **Поток выполнения:**
 
@@ -230,6 +231,17 @@ docker-compose logs webhook-server | grep "req_1234567890"
 
 Если настроен `WEBHOOK_REPORT_URL`, сервер отправит POST запрос с отчетом после завершения ETL.
 Формат отчета соответствует схеме `WebhookReport` в `api/openapi.yaml`.
+
+Фактические статусы ETL после reliability refactor:
+- `completed` — все этапы завершились без операционных ошибок
+- `partial` — данные загружены, но были recoverable ошибки/предупреждения
+- `failed` — pipeline не завершился успешно
+
+Дополнительные диагностические поля отчета:
+- `error_breakdown`
+- `error_samples`
+- `files_recovered`
+- `kassa_details`
 
 ---
 

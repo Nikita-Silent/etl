@@ -187,6 +187,47 @@ func TestFillTxStructErrors(t *testing.T) {
 	}
 }
 
+func TestFillTxStructRejectsInvalidCriticalTxFields(t *testing.T) {
+	tests := []struct {
+		name    string
+		fields  []string
+		wantSub string
+	}{
+		{
+			name:    "invalid transaction id",
+			fields:  []string{"bad-id", "01.12.2024", "10:30:00", "1", "1", "100", "1"},
+			wantSub: "transaction_id_unique",
+		},
+		{
+			name:    "invalid transaction date",
+			fields:  []string{"12345", "32.12.2024", "10:30:00", "1", "1", "100", "1"},
+			wantSub: "transaction_date",
+		},
+		{
+			name:    "invalid transaction time",
+			fields:  []string{"12345", "01.12.2024", "25:30:00", "1", "1", "100", "1"},
+			wantSub: "transaction_time",
+		},
+		{
+			name:    "invalid document number",
+			fields:  []string{"12345", "01.12.2024", "10:30:00", "1", "1", "doc", "1"},
+			wantSub: "document_number",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parseTxModel[models.TxItemRegistration1_11](tt.fields, "folderA", "tx_item_registration_1_11")
+			if err == nil {
+				t.Fatal("parseTxModel() expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.wantSub) {
+				t.Fatalf("parseTxModel() error = %q, want substring %q", err.Error(), tt.wantSub)
+			}
+		})
+	}
+}
+
 func TestFillTxStructNilPointerPanics(t *testing.T) {
 	defer func() {
 		if r := recover(); r == nil {

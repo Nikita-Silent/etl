@@ -12,7 +12,9 @@ import (
 func main() {
 	// Check command line arguments
 	if len(os.Args) < 2 {
+		// #nosec G705 -- CLI usage text is written to stderr, not rendered as HTML.
 		fmt.Fprintf(os.Stderr, "Usage: %s <file_path>\n", os.Args[0])
+		// #nosec G705 -- CLI usage text is written to stderr, not rendered as HTML.
 		fmt.Fprintf(os.Stderr, "Example: %s /path/to/frontol_export.txt\n", os.Args[0])
 		os.Exit(1)
 	}

@@ -170,6 +170,26 @@ func TestLoadDataEmptyRows(t *testing.T) {
 	}
 }
 
+func TestLoadTxTableWithMock(t *testing.T) {
+	mock := &MockPool{}
+	called := false
+	mock.LoadTxTableFunc = func(ctx context.Context, tx pgx.Tx, tableName string, data interface{}) error {
+		called = true
+		if tableName != "tx_item_registration_1_11" {
+			t.Fatalf("expected tableName tx_item_registration_1_11, got %s", tableName)
+		}
+		return nil
+	}
+
+	err := mock.LoadTxTable(context.Background(), nil, "tx_item_registration_1_11", nil)
+	if err != nil {
+		t.Fatalf("MockPool.LoadTxTable() unexpected error: %v", err)
+	}
+	if !called {
+		t.Fatal("MockPool.LoadTxTable() function was not called")
+	}
+}
+
 func TestBuildTxRowAllowZero(t *testing.T) {
 	findIndex := func(schema []models.TxColumnSpec, name string) int {
 		for i, spec := range schema {

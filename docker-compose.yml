@@ -98,12 +98,12 @@ services:
       KASSA_STRUCTURE: ${KASSA_STRUCTURE:-P13:P13;N22:N22_Inter,N22_FURN;SH54:SH54;S6:S6;L98:L98;L32:L32;S39:S39;O49:O49;L28:L28}
       
       # Application Configuration
-      LOCAL_DIR: /app/tmp/frontol
-      BATCH_SIZE: 1000
-      MAX_RETRIES: 3
-      RETRY_DELAY_SECONDS: 5
-      WAIT_DELAY_MINUTES: 1
-      LOG_LEVEL: info
+      LOCAL_DIR: ${LOCAL_DIR:-/tmp/frontol}
+      BATCH_SIZE: ${BATCH_SIZE:-1000}
+      MAX_RETRIES: ${MAX_RETRIES:-3}
+      RETRY_DELAY_SECONDS: ${RETRY_DELAY_SECONDS:-5}
+      WAIT_DELAY_MINUTES: ${WAIT_DELAY_MINUTES:-1}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
 
       # Webhook Configuration
       SERVER_PORT: ${SERVER_PORT:-8080}
@@ -118,7 +118,8 @@ services:
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:${SERVER_PORT:-8080}/api/health"]
       interval: 30s
-      timeout: 10s
+      timeout: 30s
+      start_period: 20s
       retries: 3
 
   # CLI Loader (for manual runs)

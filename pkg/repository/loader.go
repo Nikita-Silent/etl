@@ -18,15 +18,51 @@ import (
 	"github.com/user/go-frontol-loader/pkg/models"
 )
 
+const (
+	defaultMaxLoadRetries      = 5
+	defaultInitialRetryBackoff = 100 * time.Millisecond
+	defaultMaxRetryBackoff     = 5 * time.Second
+)
+
+type loaderDB interface {
+	BeginTx(ctx context.Context) (pgx.Tx, error)
+	Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row
+	LoadTxTable(ctx context.Context, tx pgx.Tx, tableName string, data interface{}) error
+}
+
+type retryPolicy struct {
+	maxRetries     int
+	initialBackoff time.Duration
+	maxBackoff     time.Duration
+}
+
 // Loader handles loading data into the database
 type Loader struct {
-	db *db.Pool
+	db     loaderDB
+	policy retryPolicy
 }
 
 // NewLoader creates a new loader instance
 func NewLoader(database *db.Pool) *Loader {
 	return &Loader{
 		db: database,
+		policy: retryPolicy{
+			maxRetries:     defaultMaxLoadRetries,
+			initialBackoff: defaultInitialRetryBackoff,
+			maxBackoff:     defaultMaxRetryBackoff,
+		},
+	}
+}
+
+func newLoaderWithDB(database loaderDB) *Loader {
+	return &Loader{
+		db: database,
+		policy: retryPolicy{
+			maxRetries:     defaultMaxLoadRetries,
+			initialBackoff: defaultInitialRetryBackoff,
+			maxBackoff:     defaultMaxRetryBackoff,
+		},
 	}
 }
 
@@ -52,6 +88,14 @@ func isRetryableError(err error) bool {
 // LoadFileData loads all transaction data from a file into the database
 // Implements retry logic with exponential backoff for deadlock errors
 func (l *Loader) LoadFileData(ctx context.Context, transactions map[string]interface{}) error {
+	return l.loadFileData(ctx, "", nil, transactions)
+}
+
+func (l *Loader) LoadFileDataWithReconcile(ctx context.Context, sourceFolder string, staleManifest map[string][]int64, transactions map[string]interface{}) error {
+	return l.loadFileData(ctx, sourceFolder, staleManifest, transactions)
+}
+
+func (l *Loader) loadFileData(ctx context.Context, sourceFolder string, staleManifest map[string][]int64, transactions map[string]interface{}) error {
 	// Log all transaction types found
 	slog.DebugContext(ctx, "Transaction types found", "event", "transaction_type_scan")
 	for tableName, data := range transactions {
@@ -71,13 +115,8 @@ func (l *Loader) LoadFileData(ctx context.Context, transactions map[string]inter
 		}
 	}
 
-	// Retry logic with exponential backoff for deadlock errors
-	const maxRetries = 5
-	const initialBackoff = 100 * time.Millisecond
-	const maxBackoff = 5 * time.Second
-
 	var lastErr error
-	for attempt := 0; attempt < maxRetries; attempt++ {
+	for attempt := 0; attempt < l.policy.maxRetries; attempt++ {
 		// Start a transaction for the entire file
 		tx, err := l.db.BeginTx(ctx)
 		if err != nil {
@@ -88,7 +127,12 @@ func (l *Loader) LoadFileData(ctx context.Context, transactions map[string]inter
 		loadErr := func() error {
 			defer func() { _ = tx.Rollback(ctx) }() // Always rollback on error
 
-			for tableName, data := range transactions {
+			if err := l.deleteStaleRows(ctx, tx, sourceFolder, staleManifest); err != nil {
+				return fmt.Errorf("failed to reconcile stale file rows: %w", err)
+			}
+
+			for _, tableName := range orderedTransactionTables(transactions) {
+				data := transactions[tableName]
 				if err := l.loadTransactionType(ctx, tx, tableName, data); err != nil {
 					return fmt.Errorf("failed to load %s: %w", tableName, err)
 				}
@@ -116,19 +160,19 @@ func (l *Loader) LoadFileData(ctx context.Context, transactions map[string]inter
 		}
 
 		// If this was the last attempt, return the error
-		if attempt == maxRetries-1 {
-			return fmt.Errorf("failed after %d retries: %w", maxRetries, loadErr)
+		if attempt == l.policy.maxRetries-1 {
+			return fmt.Errorf("failed after %d retries: %w", l.policy.maxRetries, loadErr)
 		}
 
 		// Calculate exponential backoff: initialBackoff * 2^attempt, capped at maxBackoff
-		backoff := time.Duration(float64(initialBackoff) * math.Pow(2, float64(attempt)))
-		if backoff > maxBackoff {
-			backoff = maxBackoff
+		backoff := l.policy.retryBackoff(attempt)
+		if backoff > l.policy.maxBackoff {
+			backoff = l.policy.maxBackoff
 		}
 
 		slog.WarnContext(ctx, "Retryable error detected, retrying",
 			"attempt", attempt+1,
-			"max_retries", maxRetries,
+			"max_retries", l.policy.maxRetries,
 			"error", loadErr.Error(),
 			"backoff", backoff.String(),
 			"event", "retry_deadlock",
@@ -143,7 +187,7 @@ func (l *Loader) LoadFileData(ctx context.Context, transactions map[string]inter
 		}
 	}
 
-	return fmt.Errorf("failed after %d retries: %w", maxRetries, lastErr)
+	return fmt.Errorf("failed after %d retries: %w", l.policy.maxRetries, lastErr)
 }
 
 // loadTransactionType loads a specific transaction type
@@ -152,161 +196,6 @@ func (l *Loader) loadTransactionType(ctx context.Context, tx pgx.Tx, tableName s
 		return fmt.Errorf("unknown transaction type: %s", tableName)
 	}
 	return l.db.LoadTxTable(ctx, tx, tableName, data)
-}
-
-// loadTransactionRegistrations loads transaction registrations.
-//
-//nolint:unused // Legacy load path retained for future wiring.
-func (l *Loader) loadTransactionRegistrations(ctx context.Context, tx pgx.Tx, transactions []models.TransactionRegistration) error {
-	if len(transactions) == 0 {
-		return nil
-	}
-
-	// Use the database pool's method for loading with transaction
-	return l.db.LoadTransactionRegistrations(ctx, tx, transactions)
-}
-
-// loadSpecialPrices loads special prices.
-//
-//nolint:unused // Legacy load path retained for future wiring.
-func (l *Loader) loadSpecialPrices(ctx context.Context, tx pgx.Tx, prices []models.SpecialPrice) error {
-	if len(prices) == 0 {
-		return nil
-	}
-
-	return l.db.LoadSpecialPrices(ctx, tx, prices)
-}
-
-// loadBonusTransactions loads bonus transactions.
-//
-//nolint:unused // Legacy load path retained for future wiring.
-func (l *Loader) loadBonusTransactions(ctx context.Context, tx pgx.Tx, transactions []models.BonusTransaction) error {
-	if len(transactions) == 0 {
-		return nil
-	}
-
-	return l.db.LoadBonusTransactions(ctx, tx, transactions)
-}
-
-// loadDiscountTransactions loads discount transactions.
-//
-//nolint:unused // Legacy load path retained for future wiring.
-func (l *Loader) loadDiscountTransactions(ctx context.Context, tx pgx.Tx, transactions []models.DiscountTransaction) error {
-	if len(transactions) == 0 {
-		return nil
-	}
-
-	return l.db.LoadDiscountTransactions(ctx, tx, transactions)
-}
-
-// loadBillRegistrations loads bill registrations.
-//
-//nolint:unused // Legacy load path retained for future wiring.
-func (l *Loader) loadBillRegistrations(ctx context.Context, tx pgx.Tx, bills []models.BillRegistration) error {
-	if len(bills) == 0 {
-		return nil
-	}
-
-	return l.db.LoadBillRegistrations(ctx, tx, bills)
-}
-
-// loadEmployeeEdits loads employee edits.
-//
-//nolint:unused // Legacy load path retained for future wiring.
-func (l *Loader) loadEmployeeEdits(ctx context.Context, tx pgx.Tx, edits []models.EmployeeEdit) error {
-	if len(edits) == 0 {
-		return nil
-	}
-
-	return l.db.LoadEmployeeEdits(ctx, tx, edits)
-}
-
-// loadEmployeeAccounting loads employee accounting.
-//
-//nolint:unused // Legacy load path retained for future wiring.
-func (l *Loader) loadEmployeeAccounting(ctx context.Context, tx pgx.Tx, accounting []models.EmployeeAccounting) error {
-	if len(accounting) == 0 {
-		return nil
-	}
-
-	return l.db.LoadEmployeeAccounting(ctx, tx, accounting)
-}
-
-// loadVatKKTTransactions loads VAT KKT transactions.
-//
-//nolint:unused // Legacy load path retained for future wiring.
-func (l *Loader) loadVatKKTTransactions(ctx context.Context, tx pgx.Tx, transactions []models.VatKKTTransaction) error {
-	if len(transactions) == 0 {
-		return nil
-	}
-
-	return l.db.LoadVatKKTTransactions(ctx, tx, transactions)
-}
-
-// loadAdditionalTransactions loads additional transactions.
-//
-//nolint:unused // Legacy load path retained for future wiring.
-func (l *Loader) loadAdditionalTransactions(ctx context.Context, tx pgx.Tx, transactions []models.AdditionalTransaction) error {
-	if len(transactions) == 0 {
-		return nil
-	}
-
-	return l.db.LoadAdditionalTransactions(ctx, tx, transactions)
-}
-
-// loadAstuExchangeTransactions loads ASTU exchange transactions.
-//
-//nolint:unused // Legacy load path retained for future wiring.
-func (l *Loader) loadAstuExchangeTransactions(ctx context.Context, tx pgx.Tx, transactions []models.AstuExchangeTransaction) error {
-	if len(transactions) == 0 {
-		return nil
-	}
-
-	return l.db.LoadAstuExchangeTransactions(ctx, tx, transactions)
-}
-
-// loadCounterChangeTransactions loads counter change transactions.
-//
-//nolint:unused // Legacy load path retained for future wiring.
-func (l *Loader) loadCounterChangeTransactions(ctx context.Context, tx pgx.Tx, transactions []models.CounterChangeTransaction) error {
-	if len(transactions) == 0 {
-		return nil
-	}
-
-	return l.db.LoadCounterChangeTransactions(ctx, tx, transactions)
-}
-
-// loadKKTShiftReports loads KKT shift reports.
-//
-//nolint:unused // Legacy load path retained for future wiring.
-func (l *Loader) loadKKTShiftReports(ctx context.Context, tx pgx.Tx, reports []models.KKTShiftReport) error {
-	if len(reports) == 0 {
-		return nil
-	}
-
-	return l.db.LoadKKTShiftReports(ctx, tx, reports)
-}
-
-// loadFrontolMarkUnitTransactions loads Frontol mark unit transactions.
-//
-//nolint:unused // Legacy load path retained for future wiring.
-func (l *Loader) loadFrontolMarkUnitTransactions(ctx context.Context, tx pgx.Tx, transactions []models.FrontolMarkUnitTransaction) error {
-	if len(transactions) == 0 {
-		return nil
-	}
-
-	return l.db.LoadFrontolMarkUnitTransactions(ctx, tx, transactions)
-}
-
-// loadBonusPayments loads bonus payments.
-//
-//nolint:unused // Legacy load path retained for future wiring.
-func (l *Loader) loadBonusPayments(ctx context.Context, tx pgx.Tx, payments []models.BonusPayment) error {
-	if len(payments) == 0 {
-		return nil
-	}
-
-	return l.db.LoadBonusPayments(ctx, tx, payments)
 }
 
 // GetTransactionCount returns the total number of transactions
@@ -323,7 +212,8 @@ func (l *Loader) GetTransactionCount(transactions map[string]interface{}) int {
 // GetTransactionDetails returns detailed statistics by transaction type
 func (l *Loader) GetTransactionDetails(transactions map[string]interface{}) []map[string]interface{} {
 	details := make([]map[string]interface{}, 0)
-	for tableName, data := range transactions {
+	for _, tableName := range orderedTransactionTables(transactions) {
+		data := transactions[tableName]
 		count := sliceLen(data)
 		if count > 0 {
 			details = append(details, map[string]interface{}{
@@ -346,7 +236,8 @@ func (l *Loader) PrintStatistics(ctx context.Context, transactions map[string]in
 		"total_transactions_loaded", totalCount,
 	)
 
-	for tableName, data := range transactions {
+	for _, tableName := range orderedTransactionTables(transactions) {
+		data := transactions[tableName]
 		count := sliceLen(data)
 		if count > 0 {
 			slog.DebugContext(ctx, "Table statistics",
@@ -356,84 +247,6 @@ func (l *Loader) PrintStatistics(ctx context.Context, transactions map[string]in
 		}
 	}
 }
-
-// loadFiscalPayments loads fiscal payments.
-//
-//nolint:unused // Legacy load path retained for future wiring.
-func (l *Loader) loadFiscalPayments(ctx context.Context, tx pgx.Tx, payments []models.FiscalPayment) error {
-	if len(payments) == 0 {
-		return nil
-	}
-
-	return l.db.LoadFiscalPayments(ctx, tx, payments)
-}
-
-// loadDocumentOperations loads document operations.
-//
-//nolint:unused // Legacy load path retained for future wiring.
-func (l *Loader) loadDocumentOperations(ctx context.Context, tx pgx.Tx, operations []models.DocumentOperation) error {
-	if len(operations) == 0 {
-		return nil
-	}
-
-	return l.db.LoadDocumentOperations(ctx, tx, operations)
-}
-
-// loadDocumentDiscounts loads document discounts.
-//
-//nolint:unused // Legacy load path retained for future wiring.
-func (l *Loader) loadDocumentDiscounts(ctx context.Context, tx pgx.Tx, discounts []models.DocumentDiscount) error {
-	if len(discounts) == 0 {
-		return nil
-	}
-
-	return l.db.LoadDocumentDiscounts(ctx, tx, discounts)
-}
-
-// loadCardStatusChanges loads card status changes.
-//
-//nolint:unused // Legacy load path retained for future wiring.
-func (l *Loader) loadCardStatusChanges(ctx context.Context, tx pgx.Tx, changes []models.CardStatusChange) error {
-	if len(changes) == 0 {
-		return nil
-	}
-
-	return l.db.LoadCardStatusChanges(ctx, tx, changes)
-}
-
-// loadModifierTransactions loads modifier transactions.
-//
-//nolint:unused // Legacy load path retained for future wiring.
-func (l *Loader) loadModifierTransactions(ctx context.Context, tx pgx.Tx, transactions []models.ModifierTransaction) error {
-	if len(transactions) == 0 {
-		return nil
-	}
-
-	return l.db.LoadModifierTransactions(ctx, tx, transactions)
-}
-
-// loadPrepaymentTransactions loads prepayment transactions.
-//
-//nolint:unused // Legacy load path retained for future wiring.
-func (l *Loader) loadPrepaymentTransactions(ctx context.Context, tx pgx.Tx, transactions []models.PrepaymentTransaction) error {
-	if len(transactions) == 0 {
-		return nil
-	}
-
-	return l.db.LoadPrepaymentTransactions(ctx, tx, transactions)
-}
-
-// loadNonFiscalPayments loads non-fiscal payments.
-//
-//nolint:unused // Legacy load path retained for future wiring.
-func (l *Loader) loadNonFiscalPayments(ctx context.Context, tx pgx.Tx, payments []models.NonFiscalPayment) error {
-	if len(payments) == 0 {
-		return nil
-	}
-
-	return l.db.LoadNonFiscalPayments(ctx, tx, payments)
-}
-
 func sliceLen(data interface{}) int {
 	if data == nil {
 		return 0
@@ -443,6 +256,57 @@ func sliceLen(data interface{}) int {
 		return -1
 	}
 	return rv.Len()
+}
+
+func orderedTransactionTables(transactions map[string]interface{}) []string {
+	tables := make([]string, 0, len(transactions))
+	for tableName, data := range transactions {
+		if sliceLen(data) == 0 {
+			continue
+		}
+		tables = append(tables, tableName)
+	}
+	sort.Strings(tables)
+	return tables
+}
+
+func orderedManifestTables(manifest map[string][]int64) []string {
+	tables := make([]string, 0, len(manifest))
+	for tableName, ids := range manifest {
+		if len(ids) == 0 {
+			continue
+		}
+		tables = append(tables, tableName)
+	}
+	sort.Strings(tables)
+	return tables
+}
+
+func (l *Loader) deleteStaleRows(ctx context.Context, tx pgx.Tx, sourceFolder string, manifest map[string][]int64) error {
+	if sourceFolder == "" || len(manifest) == 0 {
+		return nil
+	}
+	for _, tableName := range orderedManifestTables(manifest) {
+		if _, ok := models.TxSchemas[tableName]; !ok {
+			return fmt.Errorf("unknown tx table in stale manifest: %s", tableName)
+		}
+		ids := manifest[tableName]
+		if len(ids) == 0 {
+			continue
+		}
+		if _, err := tx.Exec(ctx, fmt.Sprintf("DELETE FROM %s WHERE source_folder = $1 AND transaction_id_unique = ANY($2)", tableName), sourceFolder, ids); err != nil {
+			return fmt.Errorf("delete stale rows from %s: %w", tableName, err)
+		}
+	}
+	return nil
+}
+
+func (p retryPolicy) retryBackoff(attempt int) time.Duration {
+	backoff := time.Duration(float64(p.initialBackoff) * math.Pow(2, float64(attempt)))
+	if backoff > p.maxBackoff {
+		return p.maxBackoff
+	}
+	return backoff
 }
 
 func schemaColumns(schema []models.TxColumnSpec) string {

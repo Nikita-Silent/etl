@@ -14,7 +14,7 @@ import (
 func main() {
 	defaultLogger := logger.New(logger.Config{
 		Level:   "info",
-		Format:  "text",
+		Format:  os.Getenv("LOG_FORMAT"),
 		Output:  os.Stdout,
 		Backend: os.Getenv("LOG_BACKEND"),
 	})
@@ -26,6 +26,7 @@ func main() {
 		date = os.Args[1]
 		// Validate date format
 		if _, err := time.Parse("2006-01-02", date); err != nil {
+			// #nosec G706 -- invalid CLI date is logged for operator troubleshooting.
 			slog.Error("Invalid date format",
 				"date", date,
 				"error", err.Error(),
@@ -49,15 +50,24 @@ func main() {
 	// Create logger
 	loggerInstance := logger.New(logger.Config{
 		Level:   cfg.LogLevel,
-		Format:  "text",
+		Format:  cfg.LogFormat,
 		Output:  os.Stdout,
 		Backend: cfg.LogBackend,
 	})
 	log := loggerInstance.WithComponent("loader")
 
 	// Create context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.EffectiveCLIRunTimeout())
 	defer cancel()
+
+	log.InfoContext(ctx, "Timeout configuration loaded",
+		"event", "timeout_config_loaded",
+		"cli_run_timeout", cfg.EffectiveCLIRunTimeout(),
+		"db_connect_timeout", cfg.EffectiveDBConnectTimeout(),
+		"ftp_connect_timeout", cfg.EffectiveFTPConnectTimeout(),
+		"pipeline_load_timeout", cfg.EffectivePipelineLoadTimeout(),
+		"wait_delay", cfg.WaitDelayMinutes,
+	)
 
 	// Run ETL pipeline
 	log.InfoContext(ctx, "Starting ETL pipeline",
