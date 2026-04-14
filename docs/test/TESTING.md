@@ -106,6 +106,12 @@ make test-coverage
 # С race detector
 make test-race
 
+# Focused reliability regression suite
+make test-reliability
+
+# Race detection for critical ETL packages
+make test-race-critical
+
 # Бенчмарки
 make test-bench
 ```
@@ -120,7 +126,7 @@ make test-bench
 - ✅ pkg/models
 - ✅ pkg/parser
 - ✅ pkg/server
-- ✅ pkg/validator
+- ✅ pkg/validation
 - ✅ pkg/migrate
 
 ### Быстрая проверка
@@ -128,6 +134,9 @@ make test-bench
 ```bash
 # Комбо: форматирование + линтер + тесты
 make check
+
+# CI gate: lint + focused regression + race on critical packages
+make ci
 ```
 
 ---
@@ -504,22 +513,22 @@ package main
 
 import (
     "fmt"
-    "github.com/user/go-frontol-loader/pkg/config"
-    "github.com/user/go-frontol-loader/pkg/validator"
+    "github.com/user/go-frontol-loader/pkg/validation"
 )
 
 func main() {
-    cfg, _ := config.LoadConfig()
-    
-    v := validator.NewConfigValidator()
-    errors := v.Validate(cfg)
-    
-    if errors.HasErrors() {
-        fmt.Println("Validation errors:")
-        fmt.Println(errors.Error())
-    } else {
-        fmt.Println("✓ Configuration is valid")
+    dateValidator := validation.NewComposite(
+        validation.Required("date"),
+        validation.DateFormat("date", "2006-01-02"),
+        validation.NotInFuture("date", "2006-01-02"),
+    )
+
+    if err := dateValidator.Validate("2024-12-18"); err != nil {
+        fmt.Println("Validation error:", err)
+        return
     }
+
+    fmt.Println("✓ Validation passed")
     
     // Тест валидации даты
     dateValidator := validator.DateValidator{}

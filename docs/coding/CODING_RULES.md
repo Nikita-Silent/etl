@@ -558,26 +558,27 @@ handler = server.RecoveryMiddleware(log)(handler)
 
 ## ✅ Валидация
 
-Используйте пакет `pkg/validator` для валидации:
+Используйте пакет `pkg/validation` для валидации:
 
 ```go
-import "github.com/user/go-frontol-loader/pkg/validator"
-
-// Валидация конфигурации
-v := validator.NewConfigValidator()
-if errors := v.Validate(cfg); errors.HasErrors() {
-    return fmt.Errorf("invalid config: %w", errors)
-}
+import "github.com/user/go-frontol-loader/pkg/validation"
 
 // Валидация даты
-dateValidator := validator.DateValidator{}
-if err := dateValidator.ValidateDate("2024-12-01"); err != nil {
+dateValidator := validation.NewComposite(
+    validation.Required("date"),
+    validation.DateFormat("date", "2006-01-02"),
+    validation.NotInFuture("date", "2006-01-02"),
+)
+if err := dateValidator.Validate("2024-12-01"); err != nil {
     return err
 }
 
-// Валидация строки транзакции
-txValidator := validator.TransactionValidator{}
-if err := txValidator.ValidateTransactionLine(line); err != nil {
+// Валидация source_folder
+folderValidator := validation.NewComposite(
+    validation.Required("source_folder"),
+    validation.KassaCode("source_folder"),
+)
+if err := folderValidator.Validate("P13/P13"); err != nil {
     return err
 }
 ```

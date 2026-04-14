@@ -7,39 +7,50 @@ import (
 // Config represents application configuration
 type Config struct {
 	// Database settings
-	DBHost     string
-	DBPort     int
-	DBUser     string
-	DBPassword string
-	DBName     string
-	DBSSLMode  string
+	DBHost           string
+	DBPort           int
+	DBUser           string
+	DBPassword       string
+	DBName           string
+	DBSSLMode        string
+	DBConnectTimeout time.Duration
 
 	// FTP settings
-	FTPHost        string
-	FTPPort        int
-	FTPUser        string
-	FTPPassword    string
-	FTPRequestDir  string
-	FTPResponseDir string
-	FTPPoolSize    int // Number of FTP connections in pool (default: 5)
-	KassaStructure map[string][]string
+	FTPHost           string
+	FTPPort           int
+	FTPUser           string
+	FTPPassword       string
+	FTPRequestDir     string
+	FTPResponseDir    string
+	FTPPoolSize       int // Number of FTP connections in pool (default: 5)
+	FTPConnectTimeout time.Duration
+	KassaStructure    map[string][]string
 
 	// Application settings
-	LocalDir         string
-	BatchSize        int
-	MaxRetries       int
-	RetryDelay       time.Duration
-	WaitDelayMinutes time.Duration
-	WorkerPoolSize   int // Number of concurrent file processing workers (default: 10)
-	LogLevel         string
-	LogBackend       string // slog or zerolog
+	LocalDir            string
+	BatchSize           int
+	MaxRetries          int
+	RetryDelay          time.Duration
+	WaitDelayMinutes    time.Duration
+	PipelineLoadTimeout time.Duration
+	CLIRunTimeout       time.Duration
+	WorkerPoolSize      int // Number of concurrent file processing workers (default: 10)
+	LogLevel            string
+	LogFormat           string // json or text/console
+	LogBackend          string // slog or zerolog
 
 	// Webhook server settings
-	ServerPort            int
-	WebhookReportURL      string
-	WebhookTimeoutMinutes int           // Timeout for sending webhook report (0 = no timeout, send only on completion)
-	WebhookBearerToken    string        // Bearer token for webhook authorization
-	ShutdownTimeout       time.Duration // Graceful shutdown timeout (default: 30 seconds)
+	ServerPort                     int
+	WebhookReportURL               string
+	WebhookTimeoutMinutes          int // Timeout for sending webhook report (0 = no timeout, send only on completion)
+	WebhookReportHTTPTimeout       time.Duration
+	WebhookReportResultWaitTimeout time.Duration
+	WebhookBearerToken             string // Bearer token for webhook authorization
+	HTTPReadHeaderTimeout          time.Duration
+	HTTPReadTimeout                time.Duration
+	HTTPWriteTimeout               time.Duration
+	HTTPIdleTimeout                time.Duration
+	ShutdownTimeout                time.Duration // Graceful shutdown timeout (default: 30 seconds)
 }
 
 // KassaFolder represents a kassa folder structure

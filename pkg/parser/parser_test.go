@@ -3,6 +3,7 @@ package parser
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/user/go-frontol-loader/pkg/models"
@@ -282,6 +283,30 @@ REPORT_001
 	// Check that we got tx_item_registration_1_11
 	if _, ok := transactions["tx_item_registration_1_11"]; !ok {
 		t.Error("ParseFile() expected tx_item_registration_1_11 in result")
+	}
+}
+
+func TestParseFileSupportsLongTransactionLines(t *testing.T) {
+	longInfo := strings.Repeat("A", 128*1024)
+	content := strings.Join([]string{
+		"1",
+		"DB_TEST_123",
+		"REPORT_001",
+		"12345;01.12.2024;10:30:00;1;001;100;1;ITEM001;GRP01;1000.50;5;5025.50;1;10;100.10;500.50;1;SKU001;1234567890;1000.00;01;0;0;0;;" + longInfo + ";1;EMP001;0;;0;0;;;0;0;0;;;0;;;;",
+	}, "\n") + "\n"
+
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "long_transactions.txt")
+	if err := os.WriteFile(tmpFile, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+
+	transactions, _, err := ParseFile(tmpFile, "test_folder")
+	if err != nil {
+		t.Fatalf("ParseFile() unexpected error for long line: %v", err)
+	}
+	if _, ok := transactions["tx_item_registration_1_11"]; !ok {
+		t.Fatal("ParseFile() expected tx_item_registration_1_11 for long line input")
 	}
 }
 

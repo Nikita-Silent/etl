@@ -1,5 +1,40 @@
 # Comprehensive Improvement Plan for Frontol 6 ETL Loader
 
+## Backlog Status
+
+This document is now a historical improvement catalog, not the active task tracker.
+Active follow-up work is tracked in `bd`.
+
+### Completed In Reliability Refactor
+
+These improvement themes were already implemented in `etl-aas` / `etl-wfp` and should not be treated as open backlog from this document:
+
+- queue worker race condition fix
+- duplicate `processFile` cleanup and file lifecycle refactor
+- context propagation fix for ETL load path
+- input validation framework adoption in HTTP handlers/config loading
+- graceful shutdown improvements
+- health check enhancements
+- FTP connection pooling
+- worker pool for file processing
+- partial failure recovery and corrected reupload reconciliation
+- configuration validation on startup
+- constant-time Bearer token comparison
+- stronger integration/reliability test coverage
+- memory reduction for `/api/files` export path
+
+### Active Follow-Up Tasks In `bd`
+
+- `etl-wfp.5` - add Loki-friendly ETL and webhook operational logging
+- `etl-wfp.6` - evaluate COPY-based bulk loading for `tx_*` tables
+- `etl-wfp.7` - unify timeout management across webhook, FTP, and ETL stages
+- `etl-wfp.8` - add Loki-friendly webhook audit and security logging
+
+### Kept As Long-Term Ideas
+
+The remaining sections below are still useful as architecture/reference material, but they are not automatically active backlog items.
+Items like plugin architecture, event-driven design, multi-tenancy, scheduled jobs, feature flags, and Kubernetes manifests should only be pulled into `bd` when they become product or deployment requirements.
+
 ## Table of Contents
 
 - [1. Architecture & Extensibility](#1-architecture--extensibility)

@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -131,6 +132,8 @@ func TestParseKassaStructure(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
+		wantErr  bool
+		errSub   string
 		wantLen  int
 		wantKeys []string
 	}{
@@ -147,10 +150,10 @@ func TestParseKassaStructure(t *testing.T) {
 			wantKeys: []string{"001", "002"},
 		},
 		{
-			name:     "empty string returns default",
-			input:    "",
-			wantLen:  2, // default has 2 kassas
-			wantKeys: []string{"001", "002"},
+			name:    "empty string returns error",
+			input:   "",
+			wantErr: true,
+			errSub:  "KASSA_STRUCTURE is required",
 		},
 		{
 			name:     "single folder per kassa",
@@ -164,11 +167,35 @@ func TestParseKassaStructure(t *testing.T) {
 			wantLen:  2,
 			wantKeys: []string{"001", "002"},
 		},
+		{
+			name:    "invalid group format",
+			input:   "001-folder1",
+			wantErr: true,
+			errSub:  "invalid KASSA_STRUCTURE group",
+		},
+		{
+			name:    "empty folder rejected",
+			input:   "001:folder1,",
+			wantErr: true,
+			errSub:  "empty folder",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := parseKassaStructure(tt.input)
+			got, err := parseKassaStructure(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("parseKassaStructure() expected error, got nil")
+				}
+				if tt.errSub != "" && !strings.Contains(err.Error(), tt.errSub) {
+					t.Fatalf("parseKassaStructure() error = %v, want substring %q", err, tt.errSub)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseKassaStructure() unexpected error: %v", err)
+			}
 
 			if len(got) != tt.wantLen {
 				t.Errorf("parseKassaStructure() len = %v, want %v", len(got), tt.wantLen)
@@ -188,10 +215,16 @@ func TestLoadConfig_Validation(t *testing.T) {
 	origDBPass := os.Getenv("DB_PASSWORD")
 	origFTPUser := os.Getenv("FTP_USER")
 	origFTPPass := os.Getenv("FTP_PASSWORD")
+	origKassaStructure := os.Getenv("KASSA_STRUCTURE")
 	defer func() {
 		os.Setenv("DB_PASSWORD", origDBPass)
 		os.Setenv("FTP_USER", origFTPUser)
 		os.Setenv("FTP_PASSWORD", origFTPPass)
+		if origKassaStructure == "" {
+			os.Unsetenv("KASSA_STRUCTURE")
+		} else {
+			os.Setenv("KASSA_STRUCTURE", origKassaStructure)
+		}
 	}()
 
 	tests := []struct {
@@ -240,6 +273,7 @@ func TestLoadConfig_Validation(t *testing.T) {
 			os.Setenv("DB_PASSWORD", tt.dbPass)
 			os.Setenv("FTP_USER", tt.ftpUser)
 			os.Setenv("FTP_PASSWORD", tt.ftpPass)
+			os.Setenv("KASSA_STRUCTURE", "P13:P13")
 
 			_, err := LoadConfig()
 
@@ -248,7 +282,7 @@ func TestLoadConfig_Validation(t *testing.T) {
 					t.Error("LoadConfig() expected error, got nil")
 					return
 				}
-				if tt.errSubstr != "" && !contains(err.Error(), tt.errSubstr) {
+				if tt.errSubstr != "" && !strings.Contains(err.Error(), tt.errSubstr) {
 					t.Errorf("LoadConfig() error = %v, want to contain %v", err, tt.errSubstr)
 				}
 			} else {
@@ -258,19 +292,6 @@ func TestLoadConfig_Validation(t *testing.T) {
 			}
 		})
 	}
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
-}
-
-func containsHelper(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
 
 func TestValidateConfig(t *testing.T) {
@@ -303,6 +324,20 @@ func TestValidateConfig(t *testing.T) {
 			},
 			wantErr:   true,
 			errSubstr: "DB_PORT must be between 1 and 65535",
+		},
+		{
+			name: "invalid DB_PORT format",
+			modifyFn: func(t *testing.T) map[string]string {
+				return map[string]string{
+					"DB_PASSWORD":     "pass",
+					"FTP_USER":        "user",
+					"FTP_PASSWORD":    "pass",
+					"KASSA_STRUCTURE": "P13:P13",
+					"DB_PORT":         "invalid",
+				}
+			},
+			wantErr:   true,
+			errSubstr: "DB_PORT must be a valid integer",
 		},
 		{
 			name: "invalid DB_PORT (too high)",
@@ -382,6 +417,61 @@ func TestValidateConfig(t *testing.T) {
 			wantErr:   true,
 			errSubstr: "LOG_LEVEL must be one of",
 		},
+		{
+			name: "invalid LOG_FORMAT",
+			modifyFn: func(t *testing.T) map[string]string {
+				return map[string]string{
+					"DB_PASSWORD":     "pass",
+					"FTP_USER":        "user",
+					"FTP_PASSWORD":    "pass",
+					"KASSA_STRUCTURE": "P13:P13",
+					"LOG_FORMAT":      "yaml",
+				}
+			},
+			wantErr:   true,
+			errSubstr: "LOG_FORMAT must be one of",
+		},
+		{
+			name: "invalid DB connect timeout",
+			modifyFn: func(t *testing.T) map[string]string {
+				return map[string]string{
+					"DB_PASSWORD":                "pass",
+					"FTP_USER":                   "user",
+					"FTP_PASSWORD":               "pass",
+					"KASSA_STRUCTURE":            "P13:P13",
+					"DB_CONNECT_TIMEOUT_SECONDS": "0",
+				}
+			},
+			wantErr:   true,
+			errSubstr: "DB_CONNECT_TIMEOUT_SECONDS must be greater than 0",
+		},
+		{
+			name: "invalid pipeline load timeout",
+			modifyFn: func(t *testing.T) map[string]string {
+				return map[string]string{
+					"DB_PASSWORD":                   "pass",
+					"FTP_USER":                      "user",
+					"FTP_PASSWORD":                  "pass",
+					"KASSA_STRUCTURE":               "P13:P13",
+					"PIPELINE_LOAD_TIMEOUT_MINUTES": "0",
+				}
+			},
+			wantErr:   true,
+			errSubstr: "PIPELINE_LOAD_TIMEOUT_MINUTES must be greater than 0",
+		},
+		{
+			name: "missing KASSA_STRUCTURE",
+			modifyFn: func(t *testing.T) map[string]string {
+				return map[string]string{
+					"DB_PASSWORD":     "pass",
+					"FTP_USER":        "user",
+					"FTP_PASSWORD":    "pass",
+					"KASSA_STRUCTURE": "",
+				}
+			},
+			wantErr:   true,
+			errSubstr: "KASSA_STRUCTURE is required",
+		},
 	}
 
 	for _, tt := range tests {
@@ -390,6 +480,10 @@ func TestValidateConfig(t *testing.T) {
 			envBackup := make(map[string]string)
 			envKeys := []string{
 				"DB_PASSWORD", "FTP_USER", "FTP_PASSWORD", "DB_PORT", "BATCH_SIZE", "MAX_RETRIES", "LOG_LEVEL",
+				"LOG_FORMAT", "KASSA_STRUCTURE", "DB_CONNECT_TIMEOUT_SECONDS", "FTP_CONNECT_TIMEOUT_SECONDS",
+				"PIPELINE_LOAD_TIMEOUT_MINUTES", "CLI_RUN_TIMEOUT_MINUTES", "WEBHOOK_REPORT_HTTP_TIMEOUT_SECONDS",
+				"WEBHOOK_REPORT_RESULT_WAIT_SECONDS", "HTTP_READ_HEADER_TIMEOUT_SECONDS", "HTTP_READ_TIMEOUT_SECONDS",
+				"HTTP_WRITE_TIMEOUT_SECONDS", "HTTP_IDLE_TIMEOUT_SECONDS", "SHUTDOWN_TIMEOUT_SECONDS",
 			}
 			for _, key := range envKeys {
 				envBackup[key] = os.Getenv(key)
@@ -407,9 +501,10 @@ func TestValidateConfig(t *testing.T) {
 
 			// Base required envs
 			baseEnv := map[string]string{
-				"DB_PASSWORD":  "pass",
-				"FTP_USER":     "user",
-				"FTP_PASSWORD": "pass",
+				"DB_PASSWORD":     "pass",
+				"FTP_USER":        "user",
+				"FTP_PASSWORD":    "pass",
+				"KASSA_STRUCTURE": "P13:P13",
 			}
 			for k, v := range baseEnv {
 				os.Setenv(k, v)
@@ -429,7 +524,7 @@ func TestValidateConfig(t *testing.T) {
 					t.Error("Expected error, got nil")
 					return
 				}
-				if tt.errSubstr != "" && !contains(err.Error(), tt.errSubstr) {
+				if tt.errSubstr != "" && !strings.Contains(err.Error(), tt.errSubstr) {
 					t.Errorf("Error = %v, want to contain %v", err, tt.errSubstr)
 				}
 			} else {
@@ -438,5 +533,25 @@ func TestValidateConfig(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestLoadFTPConfig_InvalidPorts(t *testing.T) {
+	keys := []string{"FTP_PORT", "PASV_MIN_PORT", "PASV_MAX_PORT"}
+	backup := make(map[string]string, len(keys))
+	for _, key := range keys {
+		backup[key] = os.Getenv(key)
+		defer func(k string) {
+			if backup[k] == "" {
+				os.Unsetenv(k)
+				return
+			}
+			os.Setenv(k, backup[k])
+		}(key)
+	}
+
+	os.Setenv("FTP_PORT", "nope")
+	if _, err := LoadFTPConfig(); err == nil || !strings.Contains(err.Error(), "FTP_PORT must be a valid integer") {
+		t.Fatalf("LoadFTPConfig() error = %v, want FTP_PORT validation error", err)
 	}
 }

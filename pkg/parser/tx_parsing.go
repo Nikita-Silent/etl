@@ -4,10 +4,20 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/user/go-frontol-loader/pkg/models"
 )
+
+var strictSchemaColumns = map[string]struct{}{
+	"transaction_id_unique": {},
+	"transaction_date":      {},
+	"transaction_time":      {},
+	"transaction_type":      {},
+	"cash_register_code":    {},
+	"document_number":       {},
+}
 
 type ParsedTransaction struct {
 	Table string
@@ -91,7 +101,11 @@ func fillTxStruct(dst interface{}, fields []string, sourceFolder string, schema 
 			val := int64(0)
 			if raw != "" {
 				parsed, err := strconv.ParseInt(raw, 10, 64)
-				if err == nil {
+				if err != nil {
+					if isStrictSchemaColumn(spec.Name) {
+						return fmt.Errorf("invalid int64 for %s: %q", spec.Name, raw)
+					}
+				} else {
 					val = parsed
 				}
 			}
@@ -103,7 +117,11 @@ func fillTxStruct(dst interface{}, fields []string, sourceFolder string, schema 
 			val := float64(0)
 			if raw != "" {
 				parsed, err := parseFloatWithComma(raw)
-				if err == nil {
+				if err != nil {
+					if isStrictSchemaColumn(spec.Name) {
+						return fmt.Errorf("invalid float64 for %s: %q", spec.Name, raw)
+					}
+				} else {
 					val = parsed
 				}
 			}
@@ -116,6 +134,8 @@ func fillTxStruct(dst interface{}, fields []string, sourceFolder string, schema 
 			if raw != "" {
 				if t, err := time.Parse("02.01.2006", raw); err == nil {
 					parsed = t
+				} else if isStrictSchemaColumn(spec.Name) {
+					return fmt.Errorf("invalid date for %s: %q", spec.Name, raw)
 				}
 			}
 			if field.Type() != reflect.TypeOf(time.Time{}) {
@@ -127,6 +147,8 @@ func fillTxStruct(dst interface{}, fields []string, sourceFolder string, schema 
 			if raw != "" {
 				if t, err := time.Parse("15:04:05", raw); err == nil {
 					parsed = t
+				} else if isStrictSchemaColumn(spec.Name) {
+					return fmt.Errorf("invalid time for %s: %q", spec.Name, raw)
 				}
 			}
 			if field.Type() != reflect.TypeOf(time.Time{}) {
@@ -139,4 +161,9 @@ func fillTxStruct(dst interface{}, fields []string, sourceFolder string, schema 
 	}
 
 	return nil
+}
+
+func isStrictSchemaColumn(name string) bool {
+	_, ok := strictSchemaColumns[strings.ToLower(name)]
+	return ok
 }

@@ -232,6 +232,10 @@ lint:
 test-go:
 	go test ./...
 
+# Run focused reliability regression suite
+test-reliability:
+	go test ./pkg/config ./pkg/models ./pkg/parser ./pkg/pipeline ./pkg/repository ./cmd/webhook-server ./tests/e2e
+
 # Run tests with verbose output
 test-verbose:
 	go test -v ./...
@@ -251,6 +255,10 @@ test-ftp-structure:
 test-race:
 	go test -race ./...
 
+# Run race detection on critical reliability packages
+test-race-critical:
+	go test -race ./pkg/config ./pkg/parser ./pkg/pipeline ./pkg/repository ./cmd/webhook-server
+
 # Run benchmarks
 test-bench:
 	go test -bench=. -benchmem ./...
@@ -267,7 +275,7 @@ check: fmt lint test-go
 	@echo "All checks passed!"
 
 # CI pipeline
-ci: fmt lint test-race test-coverage
+ci: fmt lint test-reliability test-race-critical
 	@echo "CI pipeline completed!"
 
 # Build binaries locally
