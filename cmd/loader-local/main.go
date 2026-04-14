@@ -17,7 +17,7 @@ import (
 func main() {
 	defaultLogger := logger.New(logger.Config{
 		Level:   "info",
-		Format:  "text",
+		Format:  os.Getenv("LOG_FORMAT"),
 		Output:  os.Stdout,
 		Backend: os.Getenv("LOG_BACKEND"),
 	})
@@ -25,7 +25,9 @@ func main() {
 
 	// Check command line arguments
 	if len(os.Args) < 2 {
+		// #nosec G705 -- CLI usage text is written to stderr, not rendered as HTML.
 		fmt.Fprintf(os.Stderr, "Usage: %s <file_path>\n", os.Args[0])
+		// #nosec G705 -- CLI usage text is written to stderr, not rendered as HTML.
 		fmt.Fprintf(os.Stderr, "Example: %s /path/to/frontol_export.txt\n", os.Args[0])
 		os.Exit(1)
 	}
@@ -34,8 +36,8 @@ func main() {
 
 	// Create logger
 	loggerInstance := logger.New(logger.Config{
-		Level:   "info",
-		Format:  "text",
+		Level:   os.Getenv("LOG_LEVEL"),
+		Format:  os.Getenv("LOG_FORMAT"),
 		Output:  os.Stdout,
 		Backend: os.Getenv("LOG_BACKEND"),
 	})
@@ -75,6 +77,7 @@ func main() {
 	// Use "local" as source folder for local file processing
 	transactions, header, err := parser.ParseFile(filePath, "local")
 	if err != nil {
+		// #nosec G706 -- file path is logged for CLI troubleshooting, not forwarded to shells.
 		slog.Error("Failed to parse file",
 			"file", filePath,
 			"error", err.Error(),
@@ -103,10 +106,18 @@ func main() {
 	log.Info("Loading data into database",
 		"event", "db_load_start",
 	)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.EffectiveCLIRunTimeout())
 	defer cancel()
 
+	log.InfoContext(ctx, "Timeout configuration loaded",
+		"event", "timeout_config_loaded",
+		"cli_run_timeout", cfg.EffectiveCLIRunTimeout(),
+		"db_connect_timeout", cfg.EffectiveDBConnectTimeout(),
+		"pipeline_load_timeout", cfg.EffectivePipelineLoadTimeout(),
+	)
+
 	if err := loader.LoadFileData(ctx, transactions); err != nil {
+		// #nosec G706 -- DB load errors are logged for CLI troubleshooting, not forwarded to shells.
 		slog.Error("Failed to load data",
 			"error", err.Error(),
 		)

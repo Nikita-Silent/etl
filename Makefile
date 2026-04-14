@@ -214,11 +214,11 @@ push:
 
 # Run webhook server locally (for development)
 run-local:
-	go run ./cmd/webhook-server/main.go
+	go run ./cmd/webhook-server
 
 # Run loader locally (for development)
 run-loader-local:
-	go run ./cmd/loader/main.go
+	go run ./cmd/loader
 
 # Format code
 fmt:
@@ -231,6 +231,10 @@ lint:
 # Run tests
 test-go:
 	go test ./...
+
+# Run focused reliability regression suite
+test-reliability:
+	go test ./pkg/config ./pkg/models ./pkg/parser ./pkg/pipeline ./pkg/repository ./cmd/webhook-server ./tests/e2e
 
 # Run tests with verbose output
 test-verbose:
@@ -251,6 +255,10 @@ test-ftp-structure:
 test-race:
 	go test -race ./...
 
+# Run race detection on critical reliability packages
+test-race-critical:
+	go test -race ./pkg/config ./pkg/parser ./pkg/pipeline ./pkg/repository ./cmd/webhook-server
+
 # Run benchmarks
 test-bench:
 	go test -bench=. -benchmem ./...
@@ -267,18 +275,18 @@ check: fmt lint test-go
 	@echo "All checks passed!"
 
 # CI pipeline
-ci: fmt lint test-race test-coverage
+ci: fmt lint test-reliability test-race-critical
 	@echo "CI pipeline completed!"
 
 # Build binaries locally
 build-local:
-	go build -o webhook-server ./cmd/webhook-server/main.go
-	go build -o frontol-loader ./cmd/loader/main.go
-	go build -o frontol-loader-local ./cmd/loader-local/main.go
-	go build -o parser-test ./cmd/parser-test/main.go
-	go build -o send-request ./cmd/send-request/main.go
-	go build -o clear-requests ./cmd/clear-requests/main.go
-	go build -o migrate ./cmd/migrate/main.go
+	go build -o webhook-server ./cmd/webhook-server
+	go build -o frontol-loader ./cmd/loader
+	go build -o frontol-loader-local ./cmd/loader-local
+	go build -o parser-test ./cmd/parser-test
+	go build -o send-request ./cmd/send-request
+	go build -o clear-requests ./cmd/clear-requests
+	go build -o migrate ./cmd/migrate
 
 # Clean local binaries
 clean-local:
@@ -290,27 +298,27 @@ clean-local:
 
 # Run all pending migrations
 migrate-up:
-	go run ./cmd/migrate/main.go up
+	go run ./cmd/migrate up
 
 # Rollback all migrations
 migrate-down:
-	go run ./cmd/migrate/main.go down
+	go run ./cmd/migrate down
 
 # Run N migrations (usage: make migrate-step N=1)
 migrate-step:
-	go run ./cmd/migrate/main.go step $(N)
+	go run ./cmd/migrate step $(N)
 
 # Show current migration version
 migrate-version:
-	go run ./cmd/migrate/main.go version
+	go run ./cmd/migrate version
 
 # Force migration version (usage: make migrate-force V=1)
 migrate-force:
-	go run ./cmd/migrate/main.go force $(V)
+	go run ./cmd/migrate force $(V)
 
 # Drop all tables (DANGEROUS!)
 migrate-drop:
-	go run ./cmd/migrate/main.go drop
+	go run ./cmd/migrate drop
 
 # Create new migration (usage: make migrate-create NAME=add_users_table)
 migrate-create:

@@ -15,25 +15,25 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 COPY . .
 RUN --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=linux \
-    go build -trimpath -ldflags="-s -w" -o /out/webhook-server ./cmd/webhook-server/main.go && \
+    go build -trimpath -ldflags="-s -w" -o /out/webhook-server ./cmd/webhook-server && \
     CGO_ENABLED=0 GOOS=linux \
-    go build -trimpath -ldflags="-s -w" -o /out/frontol-loader ./cmd/loader/main.go && \
+    go build -trimpath -ldflags="-s -w" -o /out/frontol-loader ./cmd/loader && \
     CGO_ENABLED=0 GOOS=linux \
-    go build -trimpath -ldflags="-s -w" -o /out/migrate ./cmd/migrate/main.go && \
+    go build -trimpath -ldflags="-s -w" -o /out/migrate ./cmd/migrate && \
     CGO_ENABLED=0 GOOS=linux \
-    go build -trimpath -ldflags="-s -w" -o /out/frontol-loader-local ./cmd/loader-local/main.go && \
+    go build -trimpath -ldflags="-s -w" -o /out/frontol-loader-local ./cmd/loader-local && \
     CGO_ENABLED=0 GOOS=linux \
-    go build -trimpath -ldflags="-s -w" -o /out/parser-test ./cmd/parser-test/main.go && \
+    go build -trimpath -ldflags="-s -w" -o /out/parser-test ./cmd/parser-test && \
     CGO_ENABLED=0 GOOS=linux \
-    go build -trimpath -ldflags="-s -w" -o /out/send-request ./cmd/send-request/main.go && \
+    go build -trimpath -ldflags="-s -w" -o /out/send-request ./cmd/send-request && \
     CGO_ENABLED=0 GOOS=linux \
-    go build -trimpath -ldflags="-s -w" -o /out/clear-requests ./cmd/clear-requests/main.go && \
+    go build -trimpath -ldflags="-s -w" -o /out/clear-requests ./cmd/clear-requests && \
     CGO_ENABLED=0 GOOS=linux \
-    go build -trimpath -ldflags="-s -w" -o /out/clear-db ./cmd/clear-db/main.go && \
+    go build -trimpath -ldflags="-s -w" -o /out/clear-db ./cmd/clear-db && \
     CGO_ENABLED=0 GOOS=linux \
-    go build -trimpath -ldflags="-s -w" -o /out/ftp-server ./cmd/ftp-server/main.go && \
+    go build -trimpath -ldflags="-s -w" -o /out/ftp-server ./cmd/ftp-server && \
     CGO_ENABLED=0 GOOS=linux \
-    go build -trimpath -ldflags="-s -w" -o /out/ftp-check ./cmd/ftp-check/main.go
+    go build -trimpath -ldflags="-s -w" -o /out/ftp-check ./cmd/ftp-check
 
 FROM alpine:${ALPINE_VERSION}
 

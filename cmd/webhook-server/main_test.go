@@ -38,9 +38,9 @@ func newTestServer(t *testing.T, token string) *Server {
 	s := NewServer(cfg)
 	// Prevent worker start in tests by marking queues active.
 	loadQueue := s.queueManager.GetOrCreateQueue(OperationTypeLoad)
-	loadQueue.isActive = true
+	loadQueue.workerStarted = true
 	downloadQueue := s.queueManager.GetOrCreateQueue(OperationTypeDownload)
-	downloadQueue.isActive = true
+	downloadQueue.workerStarted = true
 
 	return s
 }
@@ -187,6 +187,14 @@ func TestQueueStatusHandler_OK(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if shuttingDown, ok := payload["is_shutting_down"].(bool); !ok || shuttingDown {
+		t.Fatalf("expected is_shutting_down=false, got %v", payload["is_shutting_down"])
+	}
 }
 
 func TestDocsHandler_OK(t *testing.T) {
@@ -275,6 +283,114 @@ func TestDownloadHandler_MethodNotAllowed(t *testing.T) {
 
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("expected 405, got %d", rec.Code)
+	}
+}
+
+func TestDownloadHandler_SynchronousFailure(t *testing.T) {
+	s := newTestServer(t, "token")
+	mux := newTestMux(s)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/files?source_folder=P13&date=2024-12-01", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", rec.Code)
+	}
+	if s.queueManager.GetQueueSize(OperationTypeDownload) != 0 {
+		t.Fatalf("expected download queue size 0, got %d", s.queueManager.GetQueueSize(OperationTypeDownload))
+	}
+}
+
+func TestEnqueueRejectedDuringShutdown(t *testing.T) {
+	s := newTestServer(t, "")
+	s.stopping.Store(true)
+
+	err := s.enqueue(&QueueItem{
+		RequestID:     "req-test",
+		Date:          "2024-12-01",
+		OperationType: OperationTypeLoad,
+		Logger:        s.logger,
+		CreatedAt:     time.Now(),
+	})
+	if err == nil {
+		t.Fatal("enqueue() expected shutdown error, got nil")
+	}
+}
+
+func TestQueueStatusHandler_ShuttingDownFlag(t *testing.T) {
+	s := newTestServer(t, "token")
+	s.stopping.Store(true)
+	mux := newTestMux(s)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/queue/status", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if shuttingDown, ok := payload["is_shutting_down"].(bool); !ok || !shuttingDown {
+		t.Fatalf("expected is_shutting_down=true, got %v", payload["is_shutting_down"])
+	}
+}
+
+func TestStopDrainsLoadQueue(t *testing.T) {
+	s := NewServer(&models.Config{
+		DBHost:             "invalid",
+		DBPort:             5432,
+		DBUser:             "user",
+		DBPassword:         "pass",
+		DBName:             "db",
+		DBSSLMode:          "disable",
+		FTPHost:            "invalid",
+		FTPPort:            21,
+		FTPUser:            "user",
+		FTPPassword:        "pass",
+		FTPRequestDir:      "/request",
+		FTPResponseDir:     "/response",
+		ServerPort:         8080,
+		ShutdownTimeout:    time.Second,
+		WaitDelayMinutes:   time.Millisecond,
+		WebhookBearerToken: "token",
+	})
+
+	queue := s.queueManager.GetOrCreateQueue(OperationTypeLoad)
+	queue.workerStarted = false
+
+	for i := 0; i < 2; i++ {
+		if err := s.enqueue(&QueueItem{
+			RequestID:     "req-stop-" + time.Now().Format("150405.000000000"),
+			Date:          "2024-12-01",
+			OperationType: OperationTypeLoad,
+			Logger:        s.logger,
+			CreatedAt:     time.Now(),
+		}); err != nil {
+			t.Fatalf("enqueue() unexpected error: %v", err)
+		}
+	}
+
+	completed := make(chan struct{})
+	go func() {
+		s.Stop()
+		close(completed)
+	}()
+
+	select {
+	case <-completed:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Stop() timed out waiting for queue drain")
+	}
+
+	if got := s.queueManager.GetQueueSize(OperationTypeLoad); got != 0 {
+		t.Fatalf("expected load queue to drain, got %d items", got)
 	}
 }
 

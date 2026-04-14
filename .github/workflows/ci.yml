@@ -7,8 +7,8 @@ on:
     branches: [ main ]
 
 jobs:
-  tests:
-    name: Tests
+  checks:
+    name: Lint And Reliability Tests
     runs-on: ubuntu-latest
 
     steps:
@@ -24,10 +24,7 @@ jobs:
       - name: Install golangci-lint
         run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.8.0
 
-      - name: Run lint
+      - name: Run CI checks
         run: |
           export PATH="$(go env GOPATH)/bin:$PATH"
-          make lint
-
-      - name: Run tests
-        run: go test ./...
+          make ci

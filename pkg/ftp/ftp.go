@@ -22,7 +22,7 @@ type Client struct {
 // NewClient creates a new FTP client
 func NewClient(cfg *models.Config) (*Client, error) {
 	// Connect to FTP server
-	conn, err := ftp.Dial(cfg.FTPHost+":"+fmt.Sprintf("%d", cfg.FTPPort), ftp.DialWithTimeout(5*time.Second))
+	conn, err := ftp.Dial(cfg.FTPHost+":"+fmt.Sprintf("%d", cfg.FTPPort), ftp.DialWithTimeout(cfg.EffectiveFTPConnectTimeout()))
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to FTP server: %w", err)
 	}
@@ -121,6 +121,7 @@ func (c *Client) DownloadFile(remotePath, localPath string) error {
 	}
 	defer func() {
 		if err := localFile.Close(); err != nil {
+			// #nosec G706 -- local file path is logged for filesystem troubleshooting only.
 			slog.Warn("Failed to close local file",
 				"error", err.Error(),
 				"event", "ftp_local_file_close_error",
@@ -281,6 +282,7 @@ func (c *Client) UploadFile(localPath, remotePath string) error {
 	}
 	defer func() {
 		if err := localFile.Close(); err != nil {
+			// #nosec G706 -- local file path is logged for filesystem troubleshooting only.
 			slog.Warn("Failed to close local file",
 				"error", err.Error(),
 				"event", "ftp_local_file_close_error",

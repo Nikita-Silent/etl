@@ -41,9 +41,9 @@ Comprehensive documentation is available in the `docs/` directory. Refer to thes
 ### Development
 ```bash
 # Build all binaries locally
-go build -o webhook-server ./cmd/webhook-server/main.go
-go build -o frontol-loader ./cmd/loader/main.go
-go build -o migrate ./cmd/migrate/main.go
+go build -o webhook-server ./cmd/webhook-server
+go build -o frontol-loader ./cmd/loader
+go build -o migrate ./cmd/migrate
 
 # Or use Makefile
 make build-local
@@ -83,10 +83,10 @@ make lint
 ### Database Migrations
 ```bash
 # Apply all pending migrations
-go run ./cmd/migrate/main.go up
+go run ./cmd/migrate up
 
 # Show current version
-go run ./cmd/migrate/main.go version
+go run ./cmd/migrate version
 
 # Create new migration
 make migrate-create NAME=add_feature
