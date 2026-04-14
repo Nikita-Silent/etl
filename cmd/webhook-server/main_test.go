@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -444,6 +445,101 @@ func TestRunETLPipelineTimeoutDoesNotReleaseQueueEarly(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("runETLPipeline did not return after pipeline completion")
+	}
+}
+
+func TestRunETLPipelineSendsFinalReportAfterTimeout(t *testing.T) {
+	var (
+		mu       sync.Mutex
+		statuses []string
+	)
+	reportServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var report WebhookReport
+		if err := json.NewDecoder(r.Body).Decode(&report); err != nil {
+			t.Fatalf("decode report: %v", err)
+		}
+		mu.Lock()
+		statuses = append(statuses, report.Status)
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer reportServer.Close()
+
+	s := newTestServer(t, "")
+	s.config.WebhookTimeoutMinutes = 1
+	s.config.WebhookReportURL = reportServer.URL
+	s.config.WebhookReportResultWaitTimeout = 100 * time.Millisecond
+
+	oldRunPipeline := runPipelineFunc
+	oldTimeoutDuration := webhookTimeoutDurationFunc
+	defer func() {
+		runPipelineFunc = oldRunPipeline
+		webhookTimeoutDurationFunc = oldTimeoutDuration
+	}()
+
+	pipelineStarted := make(chan struct{}, 1)
+	allowFinish := make(chan struct{})
+	runPipelineFunc = func(ctx context.Context, logger *slog.Logger, cfg *models.Config, date string) (*pipeline.PipelineResult, error) {
+		pipelineStarted <- struct{}{}
+		<-allowFinish
+		return &pipeline.PipelineResult{Status: pipeline.PipelineStatusCompleted, Success: true}, nil
+	}
+	webhookTimeoutDurationFunc = func(minutes int) time.Duration {
+		return 10 * time.Millisecond
+	}
+
+	done := make(chan struct{})
+	go func() {
+		s.runETLPipeline("req-timeout-final", "2026-03-23", s.logger)
+		close(done)
+	}()
+
+	select {
+	case <-pipelineStarted:
+	case <-time.After(time.Second):
+		t.Fatal("pipeline did not start")
+	}
+
+	time.Sleep(30 * time.Millisecond)
+	close(allowFinish)
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("runETLPipeline did not finish")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(statuses) != 2 {
+		t.Fatalf("report count = %d, want 2 (%v)", len(statuses), statuses)
+	}
+	if statuses[0] != "timeout" {
+		t.Fatalf("first report status = %q, want timeout", statuses[0])
+	}
+	if statuses[1] != string(pipeline.PipelineStatusCompleted) {
+		t.Fatalf("second report status = %q, want %q", statuses[1], pipeline.PipelineStatusCompleted)
+	}
+}
+
+func TestGetTotalSizeCountsQueuedItems(t *testing.T) {
+	rqm := NewRequestQueueManager(10)
+	loadQueue := rqm.GetOrCreateQueue(OperationTypeLoad)
+	downloadQueue := rqm.GetOrCreateQueue(OperationTypeDownload)
+
+	if err := loadQueue.Enqueue(&QueueItem{RequestID: "1"}); err != nil {
+		t.Fatalf("enqueue load 1: %v", err)
+	}
+	if err := loadQueue.Enqueue(&QueueItem{RequestID: "2"}); err != nil {
+		t.Fatalf("enqueue load 2: %v", err)
+	}
+	if err := downloadQueue.Enqueue(&QueueItem{RequestID: "3"}); err != nil {
+		t.Fatalf("enqueue download: %v", err)
+	}
+
+	if got := rqm.GetTotalSize(); got != 3 {
+		t.Fatalf("GetTotalSize() = %d, want 3", got)
 	}
 }
 

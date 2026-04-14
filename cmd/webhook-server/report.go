@@ -66,7 +66,8 @@ func (s *Server) runETLPipeline(requestID, date string, log *logger.Logger) {
 	pipelineDone := make(chan bool, 1)
 	reportReady := make(chan *WebhookReport, 1)
 	var reportMutex sync.Mutex
-	var reportSent bool
+	var timeoutReportSent bool
+	var finalReportSent bool
 
 	go func() {
 		defer func() {
@@ -123,21 +124,33 @@ func (s *Server) runETLPipeline(requestID, date string, log *logger.Logger) {
 		reportReady <- report
 	}()
 
-	sendReport := func(r *WebhookReport) {
+	sendReport := func(r *WebhookReport, final bool) {
 		reportMutex.Lock()
-		defer reportMutex.Unlock()
-		if reportSent {
-			return
+		if final {
+			if finalReportSent {
+				reportMutex.Unlock()
+				return
+			}
+			finalReportSent = true
+		} else {
+			if timeoutReportSent {
+				reportMutex.Unlock()
+				return
+			}
+			timeoutReportSent = true
 		}
-		reportSent = true
 		r.EndTime = time.Now()
 		r.Duration = r.EndTime.Sub(r.StartTime).String()
+		webhookConfigured := s.config.WebhookReportURL != ""
+		reportMutex.Unlock()
+
 		if s.config.WebhookReportURL != "" {
 			log.InfoContext(ctx, "Sending webhook report",
 				"log_kind", "loki_operational",
 				"request_id", requestID,
 				"date", date,
 				"status", r.Status,
+				"final", final,
 				"event", "webhook_report_sending",
 			)
 			s.sendWebhookReport(r)
@@ -146,13 +159,15 @@ func (s *Server) runETLPipeline(requestID, date string, log *logger.Logger) {
 				"request_id", requestID,
 				"date", date,
 				"status", r.Status,
+				"final", final,
 				"event", "webhook_report_sent",
 			)
-		} else {
+		} else if !webhookConfigured {
 			log.InfoContext(ctx, "Webhook report URL not configured, skipping report",
 				"log_kind", "loki_operational",
 				"request_id", requestID,
 				"date", date,
+				"final", final,
 				"event", "webhook_report_skipped",
 			)
 		}
@@ -174,7 +189,7 @@ func (s *Server) runETLPipeline(requestID, date string, log *logger.Logger) {
 		)
 		select {
 		case r := <-reportReady:
-			sendReport(r)
+			sendReport(r, true)
 		case <-time.After(s.config.EffectiveWebhookReportResultWaitTimeout()):
 			log.WarnContext(ctx, "Timeout waiting for report",
 				"log_kind", "loki_operational",
@@ -197,7 +212,7 @@ func (s *Server) runETLPipeline(requestID, date string, log *logger.Logger) {
 			)
 			select {
 			case r := <-reportReady:
-				sendReport(r)
+				sendReport(r, true)
 			case <-time.After(s.config.EffectiveWebhookReportResultWaitTimeout()):
 				log.WarnContext(ctx, "Timeout waiting for report",
 					"log_kind", "loki_operational",
@@ -237,7 +252,7 @@ func (s *Server) runETLPipeline(requestID, date string, log *logger.Logger) {
 				timeoutReport.ErrorMessage = "Pipeline execution timeout reached"
 			}
 			reportMutex.Unlock()
-			sendReport(timeoutReport)
+			sendReport(timeoutReport, false)
 
 			log.InfoContext(ctx, "Timeout report sent, waiting for actual pipeline completion before releasing queue",
 				"log_kind", "loki_operational",
@@ -247,7 +262,8 @@ func (s *Server) runETLPipeline(requestID, date string, log *logger.Logger) {
 			)
 			<-pipelineDone
 			select {
-			case <-reportReady:
+			case r := <-reportReady:
+				sendReport(r, true)
 			case <-time.After(s.config.EffectiveWebhookReportResultWaitTimeout()):
 				log.WarnContext(ctx, "Timeout waiting for final report after pipeline completion",
 					"log_kind", "loki_operational",

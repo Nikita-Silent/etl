@@ -180,9 +180,7 @@ func (rqm *RequestQueueManager) GetTotalSize() int {
 
 	total := 0
 	for _, queue := range rqm.operationQueues {
-		if queue.workerStarted && !queue.closed {
-			total++
-		}
+		total += queue.Size()
 	}
 	return total
 }

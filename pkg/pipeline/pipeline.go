@@ -212,11 +212,12 @@ func runWithClients(ctx context.Context, logger *slog.Logger, cfg *models.Config
 		"kassa_details", result.KassaDetails,
 		"event", "etl_complete",
 	)
+	durationMs := time.Since(result.StartTime).Milliseconds()
 	logger.InfoContext(ctx, "ETL run summary",
 		"log_kind", "loki_operational",
 		"date", date,
 		"status", result.Status,
-		"duration_ms", result.EndTime.Sub(result.StartTime).Milliseconds(),
+		"duration_ms", durationMs,
 		"files_processed", result.FilesProcessed,
 		"files_skipped", result.FilesSkipped,
 		"files_recovered", result.FilesRecovered,
