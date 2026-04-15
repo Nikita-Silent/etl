@@ -58,6 +58,17 @@ services:
       PASV_MAX_PORT: ${PASV_MAX_PORT:-30009}
       FTP_PORT: ${FTP_PORT:-21}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      LOG_BACKEND: ${LOG_BACKEND:-zerolog}
+      LOG_SINK: ${LOG_SINK:-stdout}
+      LOKI_URL: ${LOKI_URL:-}
+      LOKI_TENANT_ID: ${LOKI_TENANT_ID:-}
+      LOKI_USERNAME: ${LOKI_USERNAME:-}
+      LOKI_PASSWORD: ${LOKI_PASSWORD:-}
+      LOKI_BATCH_WAIT_MS: ${LOKI_BATCH_WAIT_MS:-1000}
+      LOKI_BATCH_SIZE: ${LOKI_BATCH_SIZE:-100}
+      LOKI_TIMEOUT_SECONDS: ${LOKI_TIMEOUT_SECONDS:-5}
+      LOKI_LABELS: ${LOKI_LABELS:-app=frontol-etl,service=ftp-server,env=dev}
     volumes:
       - ftp_data:/home/ftp
     ports:
@@ -104,6 +115,17 @@ services:
       RETRY_DELAY_SECONDS: ${RETRY_DELAY_SECONDS:-5}
       WAIT_DELAY_MINUTES: ${WAIT_DELAY_MINUTES:-1}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      LOG_BACKEND: ${LOG_BACKEND:-zerolog}
+      LOG_SINK: ${LOG_SINK:-stdout}
+      LOKI_URL: ${LOKI_URL:-}
+      LOKI_TENANT_ID: ${LOKI_TENANT_ID:-}
+      LOKI_USERNAME: ${LOKI_USERNAME:-}
+      LOKI_PASSWORD: ${LOKI_PASSWORD:-}
+      LOKI_BATCH_WAIT_MS: ${LOKI_BATCH_WAIT_MS:-1000}
+      LOKI_BATCH_SIZE: ${LOKI_BATCH_SIZE:-100}
+      LOKI_TIMEOUT_SECONDS: ${LOKI_TIMEOUT_SECONDS:-5}
+      LOKI_LABELS: ${LOKI_LABELS:-app=frontol-etl,service=webhook-server,env=dev}
 
       # Webhook Configuration
       SERVER_PORT: ${SERVER_PORT:-8080}
@@ -154,6 +176,17 @@ services:
       RETRY_DELAY_SECONDS: ${RETRY_DELAY_SECONDS:-5}
       WAIT_DELAY_MINUTES: ${WAIT_DELAY_MINUTES:-1}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      LOG_BACKEND: ${LOG_BACKEND:-zerolog}
+      LOG_SINK: ${LOG_SINK:-stdout}
+      LOKI_URL: ${LOKI_URL:-}
+      LOKI_TENANT_ID: ${LOKI_TENANT_ID:-}
+      LOKI_USERNAME: ${LOKI_USERNAME:-}
+      LOKI_PASSWORD: ${LOKI_PASSWORD:-}
+      LOKI_BATCH_WAIT_MS: ${LOKI_BATCH_WAIT_MS:-1000}
+      LOKI_BATCH_SIZE: ${LOKI_BATCH_SIZE:-100}
+      LOKI_TIMEOUT_SECONDS: ${LOKI_TIMEOUT_SECONDS:-5}
+      LOKI_LABELS: ${LOKI_LABELS:-app=frontol-etl,service=loader,env=dev}
     volumes:
       - app_data:/tmp/frontol
     networks:

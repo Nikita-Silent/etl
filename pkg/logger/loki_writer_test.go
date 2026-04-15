@@ -2,6 +2,7 @@ package logger
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -57,5 +58,39 @@ func TestLogger_LokiWriterPushesLogs(t *testing.T) {
 
 	if buf.Len() == 0 {
 		t.Fatal("expected stdout copy in both mode")
+	}
+}
+
+func TestLogger_LokiWriterUsesBasicAuth(t *testing.T) {
+	authHeaders := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeaders <- r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	log := New(Config{
+		Output:        &bytes.Buffer{},
+		Format:        "json",
+		Sink:          "loki",
+		LokiURL:       server.URL,
+		LokiUsername:  "kadmin",
+		LokiPassword:  "Qasdasd",
+		LokiBatchWait: 10 * time.Millisecond,
+		LokiBatchSize: 1,
+		LokiTimeout:   time.Second,
+	})
+	t.Cleanup(func() { _ = log.Close() })
+
+	log.Info("hello")
+
+	select {
+	case authHeader := <-authHeaders:
+		want := "Basic " + base64.StdEncoding.EncodeToString([]byte("kadmin:Qasdasd"))
+		if authHeader != want {
+			t.Fatalf("Authorization = %q, want %q", authHeader, want)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for Loki push")
 	}
 }

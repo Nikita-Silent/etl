@@ -17,7 +17,8 @@ var lokiDynamicLabelKeys = []string{"component", "log_kind", "level", "operation
 type lokiWriter struct {
 	url          string
 	tenantID     string
-	bearerToken  string
+	username     string
+	password     string
 	client       *http.Client
 	staticLabels map[string]string
 	batchWait    time.Duration
@@ -62,7 +63,8 @@ func newLokiWriter(cfg Config) (*lokiWriter, error) {
 	w := &lokiWriter{
 		url:          cfg.LokiURL,
 		tenantID:     cfg.LokiTenantID,
-		bearerToken:  cfg.LokiBearerToken,
+		username:     cfg.LokiUsername,
+		password:     cfg.LokiPassword,
 		client:       &http.Client{Timeout: timeout},
 		staticLabels: cloneLabels(cfg.LokiLabels),
 		batchWait:    batchWait,
@@ -156,8 +158,8 @@ func (w *lokiWriter) flush(batch []lokiEntry) (int, error) {
 	if w.tenantID != "" {
 		req.Header.Set("X-Scope-OrgID", w.tenantID)
 	}
-	if w.bearerToken != "" {
-		req.Header.Set("Authorization", "Bearer "+w.bearerToken)
+	if w.username != "" || w.password != "" {
+		req.SetBasicAuth(w.username, w.password)
 	}
 	resp, err := w.client.Do(req)
 	if err != nil {

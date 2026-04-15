@@ -39,17 +39,18 @@ type Config struct {
 	Output  io.Writer
 	Backend string // zerolog (default) or slog
 	// Filtering (allow only selected values of a structured field).
-	FilterField     string   // e.g. event or component
-	FilterAllow     []string // e.g. queue_item_processing_start,queue_item_processing_completed
-	TimeFormat      string   // override zerolog time format, defaults to RFC3339Nano
-	Sink            string   // stdout (default), loki, both
-	LokiURL         string
-	LokiTenantID    string
-	LokiBearerToken string
-	LokiBatchWait   time.Duration
-	LokiBatchSize   int
-	LokiTimeout     time.Duration
-	LokiLabels      map[string]string
+	FilterField   string   // e.g. event or component
+	FilterAllow   []string // e.g. queue_item_processing_start,queue_item_processing_completed
+	TimeFormat    string   // override zerolog time format, defaults to RFC3339Nano
+	Sink          string   // stdout (default), loki, both
+	LokiURL       string
+	LokiTenantID  string
+	LokiUsername  string
+	LokiPassword  string
+	LokiBatchWait time.Duration
+	LokiBatchSize int
+	LokiTimeout   time.Duration
+	LokiLabels    map[string]string
 }
 
 // New creates a new Logger with the given configuration
@@ -585,8 +586,11 @@ func applyLokiEnv(cfg *Config) {
 	if cfg.LokiTenantID == "" {
 		cfg.LokiTenantID = strings.TrimSpace(os.Getenv("LOKI_TENANT_ID"))
 	}
-	if cfg.LokiBearerToken == "" {
-		cfg.LokiBearerToken = strings.TrimSpace(os.Getenv("LOKI_BEARER_TOKEN"))
+	if cfg.LokiUsername == "" {
+		cfg.LokiUsername = strings.TrimSpace(os.Getenv("LOKI_USERNAME"))
+	}
+	if cfg.LokiPassword == "" {
+		cfg.LokiPassword = strings.TrimSpace(os.Getenv("LOKI_PASSWORD"))
 	}
 	if cfg.LokiBatchWait <= 0 {
 		if raw := strings.TrimSpace(os.Getenv("LOKI_BATCH_WAIT_MS")); raw != "" {

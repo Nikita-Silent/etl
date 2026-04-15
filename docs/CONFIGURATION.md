@@ -119,7 +119,8 @@ KASSA_STRUCTURE=P13:P13;N22:N22_Inter,N22_FURN;SH54:SH54
 | `LOG_SINK` | ❌ Нет | `stdout` | Куда писать логи (`stdout`, `loki`, `both`) |
 | `LOKI_URL` | ❌ Нет | - | HTTP endpoint Loki push API (`/loki/api/v1/push`) |
 | `LOKI_TENANT_ID` | ❌ Нет | - | Значение заголовка `X-Scope-OrgID` для multi-tenant Loki |
-| `LOKI_BEARER_TOKEN` | ❌ Нет | - | Bearer token для прямой отправки логов в Loki |
+| `LOKI_USERNAME` | ❌ Нет | - | Username для HTTP Basic Auth при прямой отправке логов в Loki |
+| `LOKI_PASSWORD` | ❌ Нет | - | Password для HTTP Basic Auth при прямой отправке логов в Loki |
 | `LOKI_BATCH_WAIT_MS` | ❌ Нет | `1000` | Максимальное время накопления log batch перед отправкой |
 | `LOKI_BATCH_SIZE` | ❌ Нет | `100` | Максимум log entries в одном push batch |
 | `LOKI_TIMEOUT_SECONDS` | ❌ Нет | `5` | HTTP timeout отправки batch в Loki |
