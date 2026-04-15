@@ -177,8 +177,14 @@ github.com/golang-migrate/migrate/v4
 pkg/migrate/migrations/
 ├── 000001_init_schema.up.sql
 ├── 000001_init_schema.down.sql
-├── 000002_seed_data.up.sql
-└── 000002_seed_data.down.sql
+├── 000002_add_missing_constraints.up.sql
+├── 000002_add_missing_constraints.down.sql
+├── 000003_add_missing_tx_constraints.up.sql
+├── 000003_add_missing_tx_constraints.down.sql
+├── 000004_add_etl_file_load_state.up.sql
+├── 000004_add_etl_file_load_state.down.sql
+├── 000005_add_etl_operation_runs.up.sql
+└── 000005_add_etl_operation_runs.down.sql
 ```
 
 #### 4. Configuration - godotenv
@@ -205,7 +211,7 @@ dbHost := os.Getenv("DB_HOST")
 **Интерактивная документация API (Scalar)**
 
 ```
-github.com/scalar/scalar-go
+github.com/bdpiprava/scalar-go
 ```
 
 **Возможности:**
@@ -571,8 +577,8 @@ go list -u -m all
 ## 📚 См. также
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) - Архитектура проекта
-- [CODING_RULES.md](CODING_RULES.md) - Правила написания кода
-- [TESTING.md](TESTING.md) - Руководство по тестированию
+- [../coding/CODING_RULES.md](../coding/CODING_RULES.md) - Правила написания кода
+- [../test/TESTING.md](../test/TESTING.md) - Руководство по тестированию
 - [Go Official Documentation](https://go.dev/doc/)
 - [PostgreSQL Documentation](https://www.postgresql.org/docs/)
 - [Docker Documentation](https://docs.docker.com/)

@@ -72,7 +72,7 @@ logs-webhook:
 	docker-compose logs -f webhook-server
 
 logs-db:
-	docker-compose logs -f postgres
+	@echo "PostgreSQL is external; there are no docker-compose database logs in this repository"
 
 logs-ftp:
 	docker-compose logs -f ftp-server
@@ -83,7 +83,7 @@ clean:
 
 # Run tests
 test:
-	docker-compose run --rm parser-test ./parser-test /app/test-data/sample.txt
+	docker-compose run --rm parser-test ./parser-test /app/data/response.txt
 
 # Development mode
 dev:
@@ -95,7 +95,7 @@ prod:
 
 # Health check
 health:
-	docker-compose run --rm health-check
+	@PORT=$${SERVER_PORT:-8080}; curl -fsS http://localhost:$$PORT/api/health
 
 # Open shell in webhook container
 shell:
@@ -179,7 +179,7 @@ clear-db-sql:
 
 # Initialize database
 init-db:
-	docker-compose run --rm init-db
+	docker-compose run --rm migrate
 
 # Show status
 status:
@@ -196,11 +196,14 @@ update:
 
 # Backup database
 backup-db:
-	docker-compose exec postgres pg_dump -U frontol_user kassa_db > backup_$(shell date +%Y%m%d_%H%M%S).sql
+	@if [ -z "$$DB_HOST" ] || [ -z "$$DB_USER" ] || [ -z "$$DB_PASSWORD" ]; then echo "Set DB_HOST, DB_USER, and DB_PASSWORD in your environment or .env"; exit 1; fi
+	PGPASSWORD="$$DB_PASSWORD" pg_dump -h "$$DB_HOST" -p "$${DB_PORT:-5432}" -U "$$DB_USER" "$${DB_NAME:-kassa_db}" > backup_$(shell date +%Y%m%d_%H%M%S).sql
 
 # Restore database
 restore-db:
-	docker-compose exec -T postgres psql -U frontol_user kassa_db < $(FILE)
+	@if [ -z "$(FILE)" ]; then echo "Usage: make restore-db FILE=backup.sql"; exit 1; fi
+	@if [ -z "$$DB_HOST" ] || [ -z "$$DB_USER" ] || [ -z "$$DB_PASSWORD" ]; then echo "Set DB_HOST, DB_USER, and DB_PASSWORD in your environment or .env"; exit 1; fi
+	PGPASSWORD="$$DB_PASSWORD" psql -h "$$DB_HOST" -p "$${DB_PORT:-5432}" -U "$$DB_USER" "$${DB_NAME:-kassa_db}" < "$(FILE)"
 
 # Show resource usage
 stats:

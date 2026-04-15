@@ -8,7 +8,7 @@ This framework provides:
 - **Automated container management**: PostgreSQL and FTP containers via testcontainers-go
 - **Database migrations**: Automatic migration execution
 - **Fixture helpers**: Easy test data creation
-- **Seed data**: Predefined datasets for common scenarios
+- **Seed data**: Predefined datasets for common scenarios based on `tx_*` tables
 - **Clean state management**: Automatic cleanup and reset capabilities
 
 ## Quick Start
@@ -124,7 +124,7 @@ dataset := framework.GetBasicDataSet()
 ```go
 dataset := framework.SeedDataSet{
     Name: "custom",
-    Transactions: []models.TransactionRegistration{
+        Transactions: []models.TxItemRegistration1_11{
         {
             TransactionIDUnique: 1,
             SourceFolder: "001/folder1",
@@ -153,11 +153,13 @@ func TestDatabaseInsert(t *testing.T) {
     env.Reset(t)
     ctx := env.GetContext()
 
-    tr := &models.TransactionRegistration{
+    tr := &models.TxItemRegistration1_11{
         TransactionIDUnique: 123,
         SourceFolder: "001/folder1",
-        ItemCode: "TEST001",
-        AmountTotal: 100.50,
+        ItemIdentifier: "TEST001",
+        PriceWithoutDiscounts: 100.50,
+        Quantity: 1,
+        PositionAmountWithRounding: 100.50,
     }
 
     err := env.Builder.CreateTransactionRegistration(ctx, tr)
@@ -165,7 +167,7 @@ func TestDatabaseInsert(t *testing.T) {
         t.Fatalf("Failed to create: %v", err)
     }
 
-    count, _ := env.Builder.CountTransactions(ctx, "transaction_registrations")
+    count, _ := env.Builder.CountTransactions(ctx, "tx_item_registration_1_11")
     assert.Equal(t, 1, count)
 }
 ```
@@ -197,6 +199,7 @@ REPORT001
 func TestETLPipeline(t *testing.T) {
     env := framework.SetupTestEnvironment(t)
     env.Reset(t)
+    ctx := env.GetContext()
 
     // Create test file on FTP
     env.Builder.CreateFTPFile(ctx, "001", "folder1", "data.txt", testData)
@@ -207,7 +210,7 @@ func TestETLPipeline(t *testing.T) {
     assert.True(t, result.Success)
 
     // Verify data was loaded
-    count, _ := env.Builder.CountTransactions(ctx, "transaction_registrations")
+    count, _ := env.Builder.CountTransactions(ctx, "tx_item_registration_1_11")
     assert.Greater(t, count, 0)
 }
 ```

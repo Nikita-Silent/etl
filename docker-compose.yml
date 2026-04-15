@@ -170,12 +170,12 @@ services:
       # Minimal environment for parser testing
       LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
-      - ./test-data:/app/test-data:ro
+      - ./data:/app/data:ro
     networks:
       - frontol-network
     profiles:
       - cli
-    command: ["./parser-test", "/app/test-data/sample.txt"]
+    command: ["./parser-test", "/app/data/response.txt"]
 
   # Send Request (send request files to all kassas)
   send-request:

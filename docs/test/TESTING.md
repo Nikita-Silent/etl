@@ -2,6 +2,8 @@
 
 Данный документ описывает последовательность проверки всех компонентов проекта Frontol ETL.
 
+Примечание: PostgreSQL в этом репозитории внешний. Команды с `psql` ниже предполагают локально доступный клиент `psql` и корректно заполненные `DB_*` переменные.
+
 ---
 
 ## 📋 Предварительные требования
@@ -32,6 +34,8 @@ nano .env
 
 **Минимально необходимые параметры в `.env`:**
 ```env
+DB_HOST=postgres.example.com
+DB_USER=frontol_user
 DB_PASSWORD=your_secure_password
 FTP_USER=frontol
 FTP_PASSWORD=your_ftp_password
@@ -52,10 +56,10 @@ make clean-local
 make build-local
 
 # Проверка созданных файлов
-ls -lh webhook-server frontol-loader migrate parser-test send-request clear-requests
+ls -lh webhook-server frontol-loader frontol-loader-local parser-test send-request clear-requests migrate
 ```
 
-**Ожидаемый результат:** Все 6 бинарников успешно скомпилированы.
+**Ожидаемый результат:** Все 7 бинарников успешно скомпилированы.
 
 ---
 
@@ -162,15 +166,15 @@ make logs-ftp
 ```
 
 **Ожидаемые сервисы:**
-- ✅ `postgres` - База данных PostgreSQL
+- ✅ `migrate` - one-shot миграции (обычно `exited 0`)
 - ✅ `ftp-server` - FTP сервер
 - ✅ `webhook-server` - HTTP webhook сервер
 
 ### Проверка доступности сервисов
 
 ```bash
-# Проверка PostgreSQL
-docker-compose exec postgres psql -U frontol_user -d kassa_db -c "SELECT 1;"
+# Проверка внешнего PostgreSQL
+PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "${DB_PORT:-5432}" -U "$DB_USER" "$DB_NAME" -c "SELECT 1;"
 
 # Проверка webhook server
 curl http://localhost:$SERVER_PORT/api/health
@@ -194,20 +198,20 @@ make migrate-version
 # Применить все миграции
 make migrate-up
 
-# Проверить версию (должна быть 3)
+# Проверить версию (должна быть 5)
 make migrate-version
 ```
 
 **Ожидаемый результат:**
 ```
-Current version: 3
+Current version: 5
 ```
 
 ### Проверка структуры БД
 
 ```bash
-# Подключиться к БД
-docker-compose exec postgres psql -U frontol_user -d kassa_db
+# Подключиться к внешней БД
+PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "${DB_PORT:-5432}" -U "$DB_USER" "$DB_NAME"
 
 # Проверить таблицы
 \dt
@@ -222,13 +226,13 @@ docker-compose exec postgres psql -U frontol_user -d kassa_db
 # Откатить 1 миграцию
 make migrate-step N=-1
 
-# Проверить версию (должна быть 2)
+# Проверить версию (должна быть 4)
 make migrate-version
 
 # Применить обратно
 make migrate-step N=1
 
-# Проверить версию (должна быть 3)
+# Проверить версию (должна быть 5)
 make migrate-version
 ```
 
@@ -246,7 +250,9 @@ curl http://localhost:$SERVER_PORT/api/health
 # {
 #   "status": "healthy",
 #   "timestamp": "2024-12-18T12:00:00Z",
-#   "service": "frontol-etl-webhook"
+#   "service": "frontol-etl-webhook",
+#   "checks": { ... },
+#   "response_time_ms": 20
 # }
 ```
 
@@ -288,10 +294,10 @@ make logs-webhook
 
 ```bash
 # Запуск парсера на тестовых данных
-./parser-test tests/testdata/sample_transaction.txt
+./parser-test data/response.txt
 
 # Или через Docker
-docker-compose run --rm parser-test ./parser-test /app/tests/testdata/sample_transaction.txt
+docker-compose run --rm parser-test ./parser-test /app/data/response.txt
 ```
 
 **Ожидаемый результат:** Успешный парсинг транзакций из файла.
@@ -310,7 +316,7 @@ import (
 
 func main() {
     transactions, header, err := parser.ParseFile(
-        "tests/testdata/sample_transaction.txt",
+        "data/response.txt",
         "test_folder",
     )
     if err != nil {
@@ -422,12 +428,12 @@ make loader-date DATE=2024-12-01
 ### Проверка результатов
 
 ```bash
-# Подключиться к БД
-docker-compose exec postgres psql -U frontol_user -d kassa_db
+# Подключиться к внешней БД
+PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "${DB_PORT:-5432}" -U "$DB_USER" "$DB_NAME"
 
 # Проверить загруженные данные
 SELECT COUNT(*) FROM tx_item_registration_1_11;
-SELECT COUNT(*) FROM special_prices;
+SELECT COUNT(*) FROM tx_special_price_3;
 SELECT COUNT(*) FROM tx_bonus_accrual_9;
 
 # Проверить последние транзакции
@@ -560,15 +566,15 @@ go run test_validator.go
 ### Docker окружение
 
 - [ ] `make dev` запускает все сервисы
-- [ ] PostgreSQL доступен на порту $DB_PORT
+- [ ] Внешний PostgreSQL доступен по `DB_HOST`/`DB_PORT`
 - [ ] FTP сервер доступен на порту $FTP_PORT
 - [ ] Webhook server доступен на порту $SERVER_PORT
 - [ ] `curl http://localhost:$SERVER_PORT/api/health` возвращает `healthy`
 
 ### Миграции
 
-- [ ] `make migrate-up` применяет 3 миграции
-- [ ] `make migrate-version` показывает версию 3
+- [ ] `make migrate-up` применяет 5 миграций
+- [ ] `make migrate-version` показывает версию 5
 - [ ] В БД создано 16+ таблиц
 - [ ] `make migrate-down` откатывает миграции
 
@@ -594,9 +600,9 @@ go run test_validator.go
 
 ```bash
 # Проверить подключение к БД
-docker-compose exec postgres psql -U frontol_user -d kassa_db -c "SELECT 1;"
+PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "${DB_PORT:-5432}" -U "$DB_USER" "$DB_NAME" -c "SELECT 1;"
 
-# Проверить логи PostgreSQL
+# В compose нет контейнера PostgreSQL: БД внешняя, проверьте доступность хоста и креды
 make logs-db
 
 # Принудительно установить версию (если dirty)

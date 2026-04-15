@@ -109,18 +109,36 @@ GET /api/health HTTP/1.1
 Host: localhost:$SERVER_PORT
 ```
 
-**Response (200 OK):**
+**Response (200 OK / 503 Service Unavailable):**
 ```json
 {
   "status": "healthy",
   "timestamp": "2024-12-18T12:00:00Z",
-  "service": "frontol-etl-webhook"
+  "service": "frontol-etl-webhook",
+  "checks": {
+    "database": {
+      "status": "healthy",
+      "latency_ms": 12
+    },
+    "ftp": {
+      "status": "healthy",
+      "latency_ms": 8
+    },
+    "queues": {
+      "load_queue_size": 0,
+      "download_queue_size": 0,
+      "total_queue_size": 0,
+      "active_operations": 0,
+      "is_shutting_down": false
+    }
+  },
+  "response_time_ms": 20
 }
 ```
 
 **Response Codes:**
-- `200 OK` - Сервер работает корректно
-- `503 Service Unavailable` - Сервер недоступен
+- `200 OK` - сервер и его зависимости healthy
+- `503 Service Unavailable` - хотя бы одна из зависимостей (`database` или `ftp`) unhealthy, общий статус будет `degraded`
 
 **Примеры:**
 
@@ -363,12 +381,12 @@ make migrate-version
 ./parser-test /path/to/file.txt
 
 # Через Docker
-docker-compose run --rm parser-test ./parser-test /app/tests/testdata/sample.txt
+docker-compose run --rm parser-test ./parser-test /app/data/response.txt
 ```
 
 **Пример вывода:**
 ```
-Parsing file: sample.txt
+Parsing file: /app/data/response.txt
 Header: DBID=12345, ReportNum=67890
 Transactions parsed: 15 types
   - tx_item_registration_1_11: 100
@@ -422,7 +440,7 @@ docker-compose run --rm clear-requests
 
 ### Переменные окружения
 
-Полный список переменных см. в файле [CONFIGURATION.md](CONFIGURATION.md)
+Полный список переменных см. в файле [../CONFIGURATION.md](../CONFIGURATION.md)
 
 **Основные параметры:**
 
@@ -656,8 +674,8 @@ livenessProbe:
 ## 📚 См. также
 
 - [DEPLOYMENT.md](DEPLOYMENT.md) - Подробное руководство по развертыванию webhook
-- [CONFIGURATION.md](CONFIGURATION.md) - Переменные окружения
-- [DOCKER_COMPOSE_GUIDE.md](../DOCKER_COMPOSE_GUIDE.md) - Docker Compose
+- [../CONFIGURATION.md](../CONFIGURATION.md) - Переменные окружения
+- [../../DOCKER_COMPOSE_GUIDE.md](../../DOCKER_COMPOSE_GUIDE.md) - Docker Compose
 - [BUSINESS_LOGIC.md](BUSINESS_LOGIC.md) - Бизнес-логика ETL
 
 ---

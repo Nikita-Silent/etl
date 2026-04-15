@@ -309,7 +309,7 @@ paths:
       security: []
       responses:
         '200':
-          description: Сервер работает
+          description: Сервер и его зависимости healthy
           content:
             application/json:
               schema:
@@ -318,6 +318,44 @@ paths:
                 status: "healthy"
                 timestamp: "2024-12-01T10:30:00Z"
                 service: "frontol-etl-webhook"
+                checks:
+                  database:
+                    status: "healthy"
+                    latency_ms: 12
+                  ftp:
+                    status: "healthy"
+                    latency_ms: 7
+                  queues:
+                    load_queue_size: 0
+                    download_queue_size: 0
+                    total_queue_size: 0
+                    active_operations: 0
+                    is_shutting_down: false
+                response_time_ms: 19
+        '503':
+          description: Одна из зависимостей unhealthy, общий статус degraded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+              example:
+                status: "degraded"
+                timestamp: "2024-12-01T10:30:00Z"
+                service: "frontol-etl-webhook"
+                checks:
+                  database:
+                    status: "unhealthy"
+                    latency_ms: 5000
+                  ftp:
+                    status: "healthy"
+                    latency_ms: 9
+                  queues:
+                    load_queue_size: 0
+                    download_queue_size: 0
+                    total_queue_size: 0
+                    active_operations: 0
+                    is_shutting_down: false
+                response_time_ms: 5008
 
 components:
   securitySchemes:
@@ -413,17 +451,72 @@ components:
           description: Количество касс
           example: 3
 
+    DependencyHealthCheck:
+      type: object
+      required:
+        - status
+        - latency_ms
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy]
+          example: "healthy"
+        latency_ms:
+          type: integer
+          example: 12
+
+    QueueHealthCheck:
+      type: object
+      required:
+        - load_queue_size
+        - download_queue_size
+        - total_queue_size
+        - active_operations
+        - is_shutting_down
+      properties:
+        load_queue_size:
+          type: integer
+          example: 0
+        download_queue_size:
+          type: integer
+          example: 0
+        total_queue_size:
+          type: integer
+          example: 0
+        active_operations:
+          type: integer
+          example: 0
+        is_shutting_down:
+          type: boolean
+          example: false
+
+    HealthChecks:
+      type: object
+      required:
+        - database
+        - ftp
+        - queues
+      properties:
+        database:
+          $ref: '#/components/schemas/DependencyHealthCheck'
+        ftp:
+          $ref: '#/components/schemas/DependencyHealthCheck'
+        queues:
+          $ref: '#/components/schemas/QueueHealthCheck'
+
     HealthStatus:
       type: object
       required:
         - status
         - timestamp
         - service
+        - checks
+        - response_time_ms
       properties:
         status:
           type: string
           description: Статус сервера
-          enum: [healthy, unhealthy]
+          enum: [healthy, degraded]
           example: "healthy"
         timestamp:
           type: string
@@ -434,6 +527,12 @@ components:
           type: string
           description: Название сервиса
           example: "frontol-etl-webhook"
+        checks:
+          $ref: '#/components/schemas/HealthChecks'
+        response_time_ms:
+          type: integer
+          description: Полное время выполнения health-check запроса
+          example: 19
 
     Error:
       type: object

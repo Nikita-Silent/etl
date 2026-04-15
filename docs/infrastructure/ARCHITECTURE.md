@@ -102,35 +102,44 @@
 │   ├── migrate/                   # Миграции БД
 │   ├── loader-local/              # Локальный загрузчик
 │   ├── parser-test/               # Тестер парсера
+│   ├── ftp-server/                # Локальный FTP сервер
+│   ├── ftp-check/                 # Диагностика FTP
 │   ├── send-request/              # Отправка запросов
-│   └── clear-requests/            # Очистка папок
+│   ├── clear-requests/            # Очистка папок
+│   ├── clear-db/                  # Очистка ETL-данных
+│   ├── check-missing/             # Диагностика отсутствующих данных
+│   └── restore-raw-data/          # Восстановление raw data
 │
 ├── pkg/                           # Переиспользуемые пакеты
 │   ├── pipeline/                  # Оркестрация ETL pipeline
 │   ├── config/                    # Управление конфигурацией
 │   ├── db/                        # Работа с БД (pgx connection pool)
 │   ├── ftp/                       # FTP клиент
-│   ├── logger/                    # Structured logging (slog)
+│   ├── logger/                    # Structured logging (zerolog/slog)
 │   ├── migrate/                   # Database migrations
 │   ├── models/                    # Структуры данных
+│   ├── auth/                      # Bearer auth и middleware helpers
+│   ├── errors/                    # Типизированные ошибки приложения
+│   ├── operations/                # ETL operation state
 │   ├── parser/                    # Парсинг файлов Frontol
+│   ├── queue/                     # In-memory очереди
 │   ├── repository/                # Data access layer
 │   ├── server/                    # HTTP сервер + middleware
-│   └── validator/                 # Валидация данных
+│   ├── validation/                # Валидация данных
+│   └── workers/                   # Worker pool и обработчики
 │
 ├── tests/
 │   ├── integration/               # Интеграционные тесты
-│   └── testdata/                  # Тестовые данные
+│   └── e2e/                       # End-to-end тесты
 │
 ├── docs/                          # Документация
-│   ├── ARCHITECTURE.md            # Архитектура (этот файл)
-│   ├── DATABASE.md                # База данных
-│   ├── API.md                     # API и интерфейсы
-│   ├── BUSINESS_LOGIC.md          # Бизнес-логика
-│   ├── TECH_STACK.md              # Технический стек
-│   ├── ROADMAP.md                 # Roadmap
-│   ├── CODING_RULES.md            # Правила кода
-│   └── TESTING.md                 # Тестирование
+│   ├── infrastructure/ARCHITECTURE.md   # Архитектура (этот файл)
+│   ├── database/DATABASE.md             # База данных
+│   ├── infrastructure/API.md            # API и интерфейсы
+│   ├── infrastructure/BUSINESS_LOGIC.md # Бизнес-логика
+│   ├── infrastructure/TECH_STACK.md     # Технический стек
+│   ├── coding/CODING_RULES.md           # Правила кода
+│   └── test/TESTING.md                  # Тестирование
 │
 ├── Dockerfile                     # Docker образ приложений
 ├── docker-compose.yml             # Оркестрация сервисов
@@ -167,7 +176,7 @@
 │   Business Logic Layer (pkg/)           │
 │   - pipeline (ETL orchestration)        │
 │   - parser (file parsing)               │
-│   - validator (data validation)         │
+│   - validation (data validation)        │
 └─────────────────────────────────────────┘
               ▼
 ┌─────────────────────────────────────────┐

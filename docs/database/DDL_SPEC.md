@@ -1,7 +1,7 @@
 # DDL спецификация (на основе TRANSACTION_TABLES_SPEC.md)
 
 Назначение: зафиксировать целевую структуру таблиц транзакций с типами полей.  
-Базируется на `docs/TRANSACTION_TABLES_SPEC.md`.
+Базируется на `docs/database/TRANSACTION_TABLES_SPEC.md`.
 
 ## Общие правила
 

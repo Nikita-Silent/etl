@@ -109,7 +109,7 @@ docs/frontol_6_integration.md should be kept in sync with the PDF.
 
 ### Documentation upkeep
 - Any change to DB schema, API, configs, or бизнес-логике must be reflected in the relevant files under `docs/`.
-- When adding or changing tables, update both `docs/DATABASE_SCHEMA.md` and `docs/DATABASE_SCHEMA_V2.md`.
+- When adding or changing tables, update the relevant database docs under `docs/database/`, especially `docs/database/DATABASE.md`, `docs/database/DDL_SPEC.md`, `docs/database/TRANSACTION_TABLES_SCHEMA.md`, and `docs/database/TRANSACTION_TABLES_SPEC.md`.
 
 ## Project
 All avalible info about project you can find in docs/README.md

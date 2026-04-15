@@ -471,8 +471,8 @@ log.Info("ETL completed",
 log.Debug("Transaction breakdown",
     "tx_item_registration_1_11", len(transactions.Registrations),
     "tx_bonus_accrual_9", len(transactions.Bonuses),
-    "discount_transactions", len(transactions.Discounts),
-    "special_prices", len(transactions.SpecialPrices),
+    "tx_position_discount_*", len(transactions.Discounts),
+    "tx_special_price_3", len(transactions.SpecialPrices),
     // ... остальные типы
 )
 ```
@@ -482,7 +482,7 @@ log.Debug("Transaction breakdown",
 ## 📚 См. также
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) - Архитектура системы
-- [DATABASE.md](DATABASE.md) - Структура базы данных
+- [../database/DATABASE.md](../database/DATABASE.md) - Структура базы данных
 - [API.md](API.md) - API документация
 - [frontol_6_integration.md](../frontol_6_integration.md) - Формат файлов Frontol
 

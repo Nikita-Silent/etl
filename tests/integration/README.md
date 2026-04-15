@@ -26,7 +26,7 @@ export TEST_DB_PORT=5433
 export TEST_DB_USER=frontol_user
 export TEST_DB_PASSWORD=test_password
 export TEST_DB_NAME=kassa_db_test
-go run ./cmd/migrate/main.go up
+go run ./cmd/migrate up
 
 # 4. Запустить тесты
 export SKIP_INTEGRATION_TESTS=false

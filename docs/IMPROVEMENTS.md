@@ -2966,26 +2966,21 @@ go install github.com/golang-migrate/migrate/v4/cmd/migrate@latest
 
 # Start services
 echo "Starting Docker services..."
-docker-compose -f docker-compose.dev.yml up -d
+docker-compose up -d
 
-# Wait for PostgreSQL
-echo "Waiting for PostgreSQL..."
-until docker-compose -f docker-compose.dev.yml exec -T postgres pg_isready; do
+# Wait for webhook server
+echo "Waiting for webhook server..."
+until curl -fsS http://localhost:${SERVER_PORT:-8080}/api/health >/dev/null; do
     sleep 1
 done
 
 # Run migrations
 echo "Running migrations..."
-go run ./cmd/migrate/main.go up
-
-# Seed test data
-echo "Seeding test data..."
-go run ./scripts/seed-test-data.go
+go run ./cmd/migrate up
 
 # Configure git hooks
 echo "Setting up git hooks..."
-cp scripts/hooks/pre-commit .git/hooks/
-chmod +x .git/hooks/pre-commit
+# add your preferred non-interactive hook installer here if the project adopts one
 
 echo "✓ Development environment ready!"
 echo ""
@@ -3040,9 +3035,8 @@ install-tools: ## Install development tools
 
 .PHONY: db-reset
 db-reset: ## Reset database
-	go run ./cmd/migrate/main.go down
-	go run ./cmd/migrate/main.go up
-	go run ./scripts/seed-test-data.go
+	go run ./cmd/migrate down
+	go run ./cmd/migrate up
 
 .PHONY: docker-clean
 docker-clean: ## Clean Docker resources

@@ -1,242 +1,102 @@
 # Makefile Reference
 
-Справочник всех доступных команд Makefile для проекта Frontol ETL.
+Краткий справочник по актуальным таргетам из `Makefile`.
 
----
-
-## 📦 Docker команды
+## Docker и compose
 
 | Команда | Описание |
 |---------|----------|
-| `make build` | Собрать Docker образы |
-| `make up` | Запустить все сервисы |
-| `make down` | Остановить все сервисы |
-| `make dev` | Запуск в development режиме |
-| `make prod` | Запуск в production режиме |
-| `make logs` | Просмотр логов всех сервисов |
-| `make logs-webhook` | Логи webhook сервера |
-| `make logs-db` | Логи PostgreSQL |
-| `make logs-ftp` | Логи FTP сервера |
-| `make clean` | Удалить контейнеры и volumes |
-| `make status` | Показать статус сервисов |
-| `make restart` | Перезапустить сервисы |
-| `make shell` | Открыть shell в webhook контейнере |
-| `make stats` | Показать использование ресурсов |
+| `make build` | Собрать Docker-образы |
+| `make up` | Запустить compose-стек |
+| `make down` | Остановить compose-стек |
+| `make dev` | Запуск с `docker-compose.override.yml` |
+| `make prod` | Запуск с `docker-compose.prod.yml` |
+| `make logs` | Все логи compose |
+| `make logs-webhook` | Логи `webhook-server` |
+| `make logs-ftp` | Логи `ftp-server` |
+| `make logs-db` | Сообщение о том, что PostgreSQL внешний |
+| `make status` | `docker-compose ps` |
+| `make restart` | Перезапуск сервисов |
+| `make clean` | Остановить и удалить контейнеры, volumes и образы |
+| `make shell` | Shell внутри `webhook-server` |
+| `make stats` | `docker stats` |
+| `make health` | `curl` в локальный `/api/health` |
 
----
-
-## 🔧 Локальная разработка
+## ETL и ручные операции
 
 | Команда | Описание |
 |---------|----------|
-| `make build-local` | Собрать все бинарники локально |
+| `make etl` | Полный ETL для текущей даты через CLI pipeline |
+| `make etl-date DATE=YYYY-MM-DD` | Полный ETL для указанной даты |
+| `make etl-webhook` | Триггер ETL через `/api/load` для текущей даты |
+| `make etl-webhook-date DATE=YYYY-MM-DD` | Триггер ETL через `/api/load` для даты |
+| `make loader` | Ручной запуск `loader` |
+| `make loader-date DATE=YYYY-MM-DD` | Ручной запуск `loader` для даты |
+| `make send-request` | Отправить `request.txt` |
+| `make clear-requests` | Очистить FTP request/response |
+| `make clear-db` | Очистить данные через `clear-db` CLI |
+| `make clear-db-sql` | Очистить данные через SQL-скрипт |
+
+## Локальная разработка
+
+| Команда | Описание |
+|---------|----------|
+| `make build-local` | Собрать локальные бинарники |
 | `make clean-local` | Удалить локальные бинарники |
-| `make run-local` | Запустить webhook сервер локально |
-| `make run-loader-local` | Запустить loader локально |
+| `make run-local` | Запустить `cmd/webhook-server` |
+| `make run-loader-local` | Запустить `cmd/loader` |
 
----
-
-## 🧪 Тестирование
+## Тесты и качество
 
 | Команда | Описание |
 |---------|----------|
-| `make test-go` | Запустить все unit тесты |
-| `make test-verbose` | Тесты с подробным выводом |
-| `make test-coverage` | Тесты с покрытием кода |
-| `make test-race` | Тесты с race detector |
-| `make test-bench` | Запустить бенчмарки |
-| `make test-integration` | Интеграционные тесты (требует сервисы) |
-| `make test-all` | test-go + test-race + test-bench |
+| `make fmt` | `go fmt ./...` |
+| `make lint` | `golangci-lint run` |
+| `make test-go` | `go test ./...` |
+| `make test-reliability` | Фокусный regression suite |
+| `make test-verbose` | `go test -v ./...` |
+| `make test-coverage` | Покрытие и `coverage.html` |
+| `make test-ftp-structure` | Интеграционный тест FTP структуры |
+| `make test-race` | Race detector на всем проекте |
+| `make test-race-critical` | Race detector на критичных пакетах |
+| `make test-bench` | Бенчмарки |
+| `make test-integration` | Интеграционные тесты по тегу `integration` |
+| `make test-all` | `test-go` + `test-race` + `test-bench` |
+| `make check` | `fmt` + `lint` + `test-go` |
+| `make ci` | `fmt` + `lint` + `test-reliability` + `test-race-critical` |
 
----
-
-## 🎨 Качество кода
-
-| Команда | Описание |
-|---------|----------|
-| `make fmt` | Форматирование кода (go fmt) |
-| `make lint` | Запустить golangci-lint |
-| `make check` | fmt + lint + test-go |
-| `make ci` | fmt + lint + test-race + test-coverage |
-
----
-
-## 🗄️ Миграции базы данных
-
-| Команда | Описание | Пример |
-|---------|----------|--------|
-| `make migrate-up` | Применить все миграции | `make migrate-up` |
-| `make migrate-down` | Откатить все миграции | `make migrate-down` |
-| `make migrate-step` | Применить N миграций | `make migrate-step N=1` |
-| `make migrate-version` | Текущая версия | `make migrate-version` |
-| `make migrate-force` | Принудительно установить версию | `make migrate-force V=3` |
-| `make migrate-drop` | Удалить все таблицы (ОПАСНО!) | `make migrate-drop` |
-| `make migrate-create` | Создать новую миграцию | `make migrate-create NAME=add_users` |
-
----
-
-## 🚀 ETL операции
-
-### Полный ETL Pipeline (рекомендуется)
-
-| Команда | Описание | Пример |
-|---------|----------|--------|
-| `make etl` | Запустить полный ETL для сегодня | `make etl` |
-| `make etl-date` | Запустить полный ETL для даты | `make etl-date DATE=2024-12-18` |
-| `make etl-webhook` | Триггер ETL через webhook (сегодня) | `make etl-webhook` |
-| `make etl-webhook-date` | Триггер ETL через webhook (дата) | `make etl-webhook-date DATE=2024-12-18` |
-
-### Ручные операции (для отладки)
+## Миграции и внешняя БД
 
 | Команда | Описание |
 |---------|----------|
-| `make loader` | Запустить только loader |
-| `make loader-date` | Loader для конкретной даты (DATE=YYYY-MM-DD) |
-| `make send-request` | Отправить request.txt к кассам |
-| `make clear-requests` | Очистить request/response папки |
+| `make init-db` | Прогнать compose-сервис `migrate` |
+| `make migrate-up` | `go run ./cmd/migrate up` |
+| `make migrate-down` | `go run ./cmd/migrate down` |
+| `make migrate-step N=1` | `go run ./cmd/migrate step $(N)` |
+| `make migrate-version` | Показать версию миграций |
+| `make migrate-force V=3` | Принудительно выставить версию |
+| `make migrate-drop` | Удалить все таблицы |
+| `make migrate-create NAME=...` | Создать новую пару файлов миграции |
+| `make backup-db` | Backup внешней БД через локальный `pg_dump` |
+| `make restore-db FILE=backup.sql` | Restore внешней БД через локальный `psql` |
 
----
+Для `backup-db` и `restore-db` должны быть доступны `pg_dump`/`psql` и выставлены `DB_HOST`, `DB_USER`, `DB_PASSWORD`.
 
-## 💾 База данных
-
-| Команда | Описание | Пример |
-|---------|----------|--------|
-| `make init-db` | Инициализировать БД | `make init-db` |
-| `make backup-db` | Создать backup базы | `make backup-db` |
-| `make restore-db` | Восстановить из backup | `make restore-db FILE=backup.sql` |
-
----
-
-## 🔍 Утилиты
-
-| Команда | Описание |
-|---------|----------|
-| `make health` | Health check всех сервисов |
-| `make update` | Обновить и перезапустить |
-| `make push` | Build и push в registry (требует REGISTRY) |
-| `make setup-dev` | Настройка окружения для разработки |
-| `make quick-start` | setup-dev + build + up |
-
----
-
-## 📋 Примеры использования
-
-### Первый запуск
+## Быстрые сценарии
 
 ```bash
-# 1. Настройка
+# первый запуск
 make setup-dev
-
-# 2. Запуск
 make build
 make up
-
-# 3. Инициализация БД
-make migrate-up
-
-# 4. Проверка
 make health
-```
 
-### Ежедневная работа
-
-```bash
-# Проверка кода перед коммитом
-make check
-
-# Запуск полного ETL для сегодня (самый простой способ)
-make etl
-
-# Или через webhook (асинхронно)
-make etl-webhook
-
-# Просмотр логов
-make logs
-```
-
-### Запуск ETL для конкретной даты
-
-```bash
-# Через CLI
+# ручной ETL для даты
 make etl-date DATE=2024-12-18
 
-# Через webhook
-make etl-webhook-date DATE=2024-12-18
-
-# Просмотр логов
-make logs-webhook
-```
-
-### Отладка
-
-```bash
-# Смотрим логи конкретного сервиса
-make logs-webhook
-
-# Открываем shell в контейнере
-make shell
-
-# Проверяем БД
-docker-compose exec postgres psql -U frontol_user -d kassa_db
-
-# Смотрим статистику
-make stats
-```
-
-### Тестирование
-
-```bash
-# Полная проверка
-make ci
-
-# Только unit тесты
-make test-go
-
-# С покрытием
-make test-coverage
-open coverage.html
-
-# Бенчмарки
-make test-bench
-```
-
-### Миграции
-
-```bash
-# Применить все
-make migrate-up
-
-# Откатить последнюю
-make migrate-step N=-1
-
-# Проверить версию
+# миграции
 make migrate-version
-
-# Создать новую
-make migrate-create NAME=add_customers_table
-
-# Исправить dirty state
-make migrate-force V=3
 make migrate-up
-```
-
-### Проблемы
-
-```bash
-# Перезапуск с нуля
-make down
-make clean
-make build
-make up
-make migrate-up
-
-# Очистка тестов
-go clean -testcache
-make test-go
-
-# Rebuild бинарников
-make clean-local
-make build-local
 ```
 
 ---

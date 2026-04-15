@@ -1,196 +1,72 @@
-# 🚀 Быстрый старт для проверки
+# Quick Start
 
-Минимальный набор команд для проверки работоспособности проекта.
+Минимальная проверка текущего ETL-стека.
 
----
+## Перед стартом
 
-## ⚡ За 5 минут
+- PostgreSQL в этом репозитории внешний, его нет в `docker-compose.yml`.
+- Нужны заполненные `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` в `.env`.
+
+## За 5 минут
 
 ```bash
-# 1. Настройка окружения
 cp env.example .env
-# Отредактируйте .env (DB_HOST, DB_USER, DB_PASSWORD)
+# отредактируйте .env
 
-# 2. Запуск сервисов через docker-compose
 docker compose up -d
-# ✓ Миграции БД (автоматически)
-# ✓ FTP сервер
-# ✓ Webhook server
+docker compose ps
 
-# 3. Проверка webhook
-curl http://localhost:$SERVER_PORT/api/health
-# ✓ {"status":"healthy",...}
+curl http://localhost:${SERVER_PORT:-8080}/api/health
 
-# 4. Запуск ETL через webhook
-curl -X POST http://localhost:$SERVER_PORT/api/load \
+curl -X POST http://localhost:${SERVER_PORT:-8080}/api/load \
   -H 'Content-Type: application/json' \
   -d '{"date": "2024-12-18"}'
-# ✓ {"status":"queued",...}
 
-# 5. Просмотр логов
 docker compose logs -f webhook-server
-# ✓ ETL pipeline выполнен
 ```
 
-**Готово!** Проект работает и ETL запущен ✅
+Ожидаемый health-ответ:
 
-📖 **Подробные руководства:** 
-- [DOCKER_COMPOSE_GUIDE.md](DOCKER_COMPOSE_GUIDE.md) - Docker Compose
-- [MIGRATIONS.md](MIGRATIONS.md) - Миграции БД (автоматические!)
-
----
-
-## 📊 Полная проверка (10 минут)
-
-### 1️⃣ Сборка образов
-
-```bash
-# Собрать Docker образы
-docker-compose build
-
-# Проверить образы
-docker-compose images
+```json
+{
+  "status": "healthy",
+  "timestamp": "2026-04-14T12:00:00Z",
+  "service": "frontol-etl-webhook",
+  "checks": {
+    "database": {"status": "healthy", "latency_ms": 12},
+    "ftp": {"status": "healthy", "latency_ms": 8},
+    "queues": {
+      "load_queue_size": 0,
+      "download_queue_size": 0,
+      "total_queue_size": 0,
+      "active_operations": 0,
+      "is_shutting_down": false
+    }
+  },
+  "response_time_ms": 20
+}
 ```
 
-### 2️⃣ Запуск сервисов
+Если одна из зависимостей недоступна, `status` будет `degraded`, а HTTP-код `503`.
+
+## Полезные команды
 
 ```bash
-# Запустить все сервисы
-docker-compose up -d
+# повторно применить миграции вручную
+docker compose run --rm migrate
 
-# Проверить статус
-docker-compose ps
-
-# Должны быть запущены:
-# - migrate (exited 0 - это нормально, миграции выполнены!)
-# - ftp-server
-# - webhook-server
-```
-
-### 3️⃣ Проверка API
-
-```bash
-# Health check
-curl http://localhost:$SERVER_PORT/api/health
-
-# Должен вернуть:
-# {
-#   "status": "healthy",
-#   "service": "frontol-etl-webhook",
-#   "timestamp": "..."
-# }
-```
-
-### 4️⃣ Тест парсера (опционально)
-
-```bash
-# Протестировать парсер на файле
-docker-compose run --rm parser-test ./parser-test /app/test-data/sample.txt
-```
-
-### 5️⃣ Запуск ETL
-
-```bash
-# Вариант 1: Через webhook (рекомендуется)
-curl -X POST http://localhost:$SERVER_PORT/api/load \
-  -H 'Content-Type: application/json' \
-  -d '{"date": "2024-12-18"}'
-
-# Вариант 2: Через CLI (ручной контроль)
-docker-compose run --rm clear-requests
+# ручной ETL через CLI
+docker compose run --rm clear-requests
 sleep 60
-docker-compose run --rm loader ./frontol-loader 2024-12-18
+docker compose run --rm loader ./frontol-loader 2024-12-18
 
-# Проверить логи
-docker-compose logs -f webhook-server
+# тест парсера
+docker compose run --rm parser-test ./parser-test /app/data/response.txt
 ```
 
----
+## Куда смотреть дальше
 
-## 🎯 Результаты проверки
-
-| Компонент | Команда | Ожидаемый результат |
-|-----------|---------|---------------------|
-| **Сборка** | `docker-compose build` | Успешно |
-| **Миграции** | `docker-compose up migrate` | Exited 0 (автоматически) |
-| **Запуск** | `docker-compose up -d` | 2 сервиса Up |
-| **Статус** | `docker-compose ps` | webhook-server Up |
-| **Webhook** | `curl localhost:$SERVER_PORT/api/health` | healthy |
-| **ETL** | `curl -X POST localhost:$SERVER_PORT/api/load...` | queued |
-| **Логи** | `docker-compose logs webhook-server` | Успешно ✅ |
-
----
-
-## 🔥 Горячие команды
-
-```bash
-# Запуск сервисов
-docker-compose up -d
-
-# ETL через webhook для сегодня
-curl -X POST http://localhost:$SERVER_PORT/api/load -H 'Content-Type: application/json' -d '{}'
-
-# ETL через webhook для даты
-curl -X POST http://localhost:$SERVER_PORT/api/load \
-  -H 'Content-Type: application/json' \
-  -d '{"date":"2024-12-18"}'
-
-# ETL через CLI (ручной режим)
-docker-compose run --rm clear-requests
-sleep 60
-docker-compose run --rm loader ./frontol-loader 2024-12-18
-
-# Просмотр логов в реальном времени
-docker-compose logs -f webhook-server
-
-# Остановка всех сервисов
-docker-compose down
-
-# Перезапуск
-docker-compose restart
-```
-
----
-
-## ❓ Проблемы?
-
-**Сервисы не запускаются:**
-```bash
-docker-compose down
-docker-compose build
-docker-compose up -d
-```
-
-**Webhook не отвечает:**
-```bash
-docker-compose logs webhook-server
-docker-compose restart webhook-server
-```
-
-**ETL не работает:**
-```bash
-# Проверить логи
-docker-compose logs -f webhook-server
-
-# Проверить FTP
-docker-compose logs ftp-server
-
-# Проверить БД подключение
-docker-compose exec webhook-server env | grep DB_
-```
-
----
-
-## 📚 Подробнее
-
-- 🐳 **Docker Compose:** [DOCKER_COMPOSE_GUIDE.md](DOCKER_COMPOSE_GUIDE.md) - **Главное руководство!**
-- 🔌 **Webhook API:** [WEBHOOK_GUIDE.md](WEBHOOK_GUIDE.md)
-- 📝 **Правила кода:** [CODING_RULES.md](.cursor/rules/CODING_RULES.mdc)
-- 📖 **Тестирование:** [TESTING.md](.cursor/rules/TESTING.mdc)
-- 🛠️ **Makefile:** [MAKEFILE_REFERENCE.md](MAKEFILE_REFERENCE.md) - опционально
-
----
-
-## ✅ Успех!
-
-Если все команды выше выполнились успешно, проект полностью рабочий! 🎉
+- [DOCKER_COMPOSE_GUIDE.md](DOCKER_COMPOSE_GUIDE.md)
+- [docs/infrastructure/API.md](docs/infrastructure/API.md)
+- [docs/CONFIGURATION.md](docs/CONFIGURATION.md)
+- [MAKEFILE_REFERENCE.md](MAKEFILE_REFERENCE.md)

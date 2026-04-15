@@ -68,5 +68,6 @@ docs/
 ├── database/TRANSACTION_TABLES_SPEC.md
 ├── coding/CODING_RULES.md
 ├── coding/TROUBLESHOOTING.md
-└── test/TESTING.md
+├── test/TESTING.md
+└── test/TEST_PLAN.md
 ```

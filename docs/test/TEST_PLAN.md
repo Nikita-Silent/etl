@@ -192,7 +192,7 @@ TestGenerateConflictColumns()       // Composite PK: (transaction_id_unique, sou
 
 ### 4. pkg/pipeline (КРИТИЧЕСКИЙ ПРОБЕЛ)
 
-#### 4.1 Pipeline Orchestration (pipeline_test.go - расширение)
+#### 4.1 Pipeline Orchestration (`pipeline_reliability_test.go` и связанных pipeline tests - расширение)
 
 **Текущие тесты:** Только структуры данных
 **Нужны тесты для:**
@@ -732,21 +732,10 @@ TestE2E_MalformedFile()
 ## Структура директорий
 
 ```
+data/
+└── response.txt                   # Реальный sample Frontol response для e2e/parser smoke tests
+
 tests/
-├── fixtures/                       # Тестовые данные
-│   ├── transactions/
-│   │   ├── type_01_sample.txt     # Пример type 1
-│   │   ├── type_02_sample.txt     # Пример type 2
-│   │   ├── ...
-│   │   └── mixed_types.txt        # Смешанные типы
-│   └── ftp/
-│       ├── P13/
-│       │   └── P13/
-│       │       └── export_001.txt
-│       └── N22/
-│           ├── N22_Inter/
-│           └── N22_FURN/
-│
 ├── integration/
 │   ├── framework/                 # ✅ Уже есть
 │   ├── db_integration_test.go     # ⬜ Новый
@@ -756,14 +745,12 @@ tests/
 │   └── api_integration_test.go    # ⬜ Новый
 │
 ├── e2e/
+│   ├── parser_response_test.go    # ✅ Уже есть
 │   ├── webhook_test.go            # ⬜ Новый
 │   ├── cli_test.go                # ⬜ Новый
 │   ├── etl_full_test.go           # ⬜ Новый
 │   ├── errors_test.go             # ⬜ Новый
-│   └── helpers/
-│       ├── docker.go              # Docker Compose helpers
-│       ├── api.go                 # API client helpers
-│       └── db.go                  # DB assertion helpers
+│   └── helpers/                   # ⬜ При необходимости
 │
 pkg/
 ├── server/
@@ -775,7 +762,7 @@ pkg/
 ├── repository/
 │   └── loader_test.go             # ⬜ Расширить
 └── pipeline/
-    └── pipeline_test.go           # ⬜ Расширить
+    └── pipeline_reliability_test.go # ✅ Уже есть, можно расширять
 ```
 
 ---

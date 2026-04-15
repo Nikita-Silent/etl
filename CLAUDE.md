@@ -14,27 +14,27 @@ Comprehensive documentation is available in the `docs/` directory. Refer to thes
 - **docs/README.md** - Documentation navigation hub. Use this as the entry point to find the right documentation for your task.
 
 **Architecture & Design:**
-- **docs/ARCHITECTURE.md** - System architecture, design patterns, component interactions, and data flows. Read this when understanding how components work together or planning architectural changes.
-- **docs/TECH_STACK.md** - Technologies, libraries, and their justifications. Consult when adding new dependencies or understanding technology choices (e.g., why pgx instead of GORM).
+- **docs/infrastructure/ARCHITECTURE.md** - System architecture, design patterns, component interactions, and data flows. Read this when understanding how components work together or planning architectural changes.
+- **docs/infrastructure/TECH_STACK.md** - Technologies, libraries, and their justifications. Consult when adding new dependencies or understanding technology choices (e.g., why pgx instead of GORM).
 
 **Development:**
 - **docs/CODING_RULES.md** - Code style, security practices, performance patterns, and testing guidelines. Review before writing code to ensure consistency with project standards.
-- **docs/TESTING.md** - Complete testing guide including unit tests, integration tests, benchmarks, and E2E testing. Use when writing tests or debugging test failures.
-- **docs/BUSINESS_LOGIC.md** - ETL pipeline business logic, file parsing details, and data transformation rules. Essential for understanding or modifying the ETL process.
+- **docs/test/TESTING.md** - Complete testing guide including unit tests, integration tests, benchmarks, and E2E testing. Use when writing tests or debugging test failures.
+- **docs/infrastructure/BUSINESS_LOGIC.md** - ETL pipeline business logic, file parsing details, and data transformation rules. Essential for understanding or modifying the ETL process.
 
 **Database:**
-- **docs/DATABASE.md** - Database schema, tables, indexes, migrations, and query examples. Reference when working with database schema, writing queries, or understanding data relationships.
+- **docs/database/DATABASE.md** - Database schema, tables, indexes, migrations, and query examples. Reference when working with database schema, writing queries, or understanding data relationships.
 
 **API & Integration:**
-- **docs/API.md** - HTTP webhook API, CLI interfaces, and usage examples. Use when working with API endpoints or integrating external systems.
+- **docs/infrastructure/API.md** - HTTP webhook API, CLI interfaces, and usage examples. Use when working with API endpoints or integrating external systems.
 - **docs/CONFIGURATION.md** - All environment variables with descriptions and examples. Consult when adding new config options or troubleshooting configuration issues.
 
 **Operations:**
-- **docs/DEPLOYMENT.md** - Production deployment guides (Docker Compose, systemd), monitoring, and backup strategies. Read before deploying to production or setting up new environments.
-- **docs/TROUBLESHOOTING.md** - Common problems and solutions for Docker, database, FTP, and ETL issues. Start here when debugging problems.
+- **docs/infrastructure/DEPLOYMENT.md** - Production deployment guides (Docker Compose, systemd), monitoring, and backup strategies. Read before deploying to production or setting up new environments.
+- **docs/coding/TROUBLESHOOTING.md** - Common problems and solutions for Docker, database, FTP, and ETL issues. Start here when debugging problems.
 
 **Planning:**
-- **docs/ROADMAP.md** - Project roadmap, planned features, and current limitations. Review when planning new features or understanding project direction.
+- **docs/IMPROVEMENTS.md** - Improvement backlog and technical debt notes. Review when planning follow-up work or understanding deferred cleanup items.
 
 ## Common Commands
 
