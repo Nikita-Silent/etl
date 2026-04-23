@@ -1,6 +1,6 @@
 module github.com/user/go-frontol-loader
 
-go 1.24.0
+go 1.25.0
 
 require (
 	github.com/bdpiprava/scalar-go v0.13.0
@@ -12,7 +12,7 @@ require (
 	github.com/rs/zerolog v1.34.0
 	github.com/spf13/afero v1.14.0
 	github.com/testcontainers/testcontainers-go v0.40.0
-	golang.org/x/text v0.32.0
+	golang.org/x/text v0.36.0
 )
 
 require (
@@ -76,7 +76,7 @@ require (
 	go.opentelemetry.io/otel/sdk/metric v1.38.0 // indirect
 	go.opentelemetry.io/otel/trace v1.38.0 // indirect
 	golang.org/x/crypto v0.45.0 // indirect
-	golang.org/x/sync v0.19.0 // indirect
+	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.38.0 // indirect
 	google.golang.org/grpc v1.78.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
